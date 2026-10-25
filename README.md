@@ -1,8 +1,9 @@
-# Terrabot v0.4.4 — Trixie
+# Terrabot v0.5.0 — Floating Trixie
 
 Trixie is a curious, technically capable AI companion who lives in your terminal.
-Her handcrafted lilac coat, bright turquoise orb, expressive eyes and rounded paws are drawn
-entirely with terminal cells. She explores, investigates, plays, rests and reacts
+Her handcrafted lilac body, large rounded arms, expressive eyes and turquoise orb are drawn
+entirely with terminal cells. She has no legs or feet and floats near her home position.
+She explores, investigates, plays, rests and reacts
 to conversation while your local Ollama model supplies her replies.
 
 Her idle activities are cosmetic. She never demands care, suffers for being left
@@ -265,7 +266,7 @@ cargo run --release --example trixie-demo -- --clip Jump
 | `,` / `;` | Slower / faster playback, 0.1×–3× |
 | X | Cycle facial expressions independently |
 | V | Reverse facing |
-| G | Toggle bounds, ground, origin, face, hands, feet and orb anchors |
+| G | Toggle bounds, origin, face/arm anchors, orb depth, events and timing |
 | Enter | Replay selected clip from the start |
 | Z | Return to autonomous life and clear preview overrides |
 
@@ -372,3 +373,40 @@ local home offset and actual output scale alongside the existing anchor guides.
 before/after frames and 72 accepted full-colour references. Earlier release
 sections above describe historical stages; this pass removes the remaining mint
 body markings that were deliberately retained in v0.4.3.
+
+
+## v0.5.0: handcrafted floating frames
+
+The current renderer selects complete 36×36 sprite frames from `src/sprites`.
+Each editable text file contains the body, large integrated arms, shading and
+silhouette; dots are transparent. `src/art.rs` defines the stable origin, face,
+arm and orb anchors. Frames are parsed and their single silhouette boundary is
+normalized once in a shared cache. Only the face overlays and floating root
+translation change during drawing; no procedural limbs, feet, body resampling or
+per-frame text parsing remain.
+
+Eight authored poses form the existing named clips: relaxed, drooping, peeking,
+raised arms, reaching, holding, stretching and sleeping. The normal open-eye pixels
+are unchanged; cheeks now sit consistently below them. Wake transitions from
+closed to sleepy to open eyes. The retained Walk/Run clip names are local glides.
+Simulation movement accelerates and decelerates within the existing home bounds,
+while root hover adds a slow one-pixel oscillation (slower during sleep). Reduced
+motion retains a fixed floating altitude.
+
+The orb has one position and explicit Behind, Side, Front, Held and Free depth
+states. Curious follows a local orbit whose depth changes at the outer sides.
+Behind draws before the character; Front draws after it. Held adds an authored
+foreground hand over the orb's lower rim. Catch/release events remain controlled
+by the existing timeline. Orb colour pulse and bounded physics stay procedural.
+
+`--showcase` gives Curious eight seconds and Play seven seconds so both orbit
+halves, holding, tossing and catching are visible. G reports frame duration,
+anchors, depth and the latest event; pause, frame stepping and slow playback remain.
+See [actual terminal captures and validation](docs/captures/v050/README.md).
+
+The embedded-frame/cache/playback approach was informed by
+[Gostty's source](https://github.com/ashish0kumar/gostty/blob/main/main.go).
+Trixie's artwork is original. Terrabox's changed-row renderer and TerraGame's
+fixed-step simulation remain in use. Earlier release notes above describe the
+historical grounded artwork; v0.5.0 replaces it without changing saved data or
+chat, model-selection and pet-menu behavior.

@@ -1,0 +1,83 @@
+[
+  {
+    "target_fps": 20,
+    "sample": 1,
+    "frames": 80,
+    "elapsed_seconds": 4.042,
+    "observed_fps": 19.79,
+    "cpu_seconds": 0.03886,
+    "output_bytes": 251550
+  },
+  {
+    "target_fps": 20,
+    "sample": 2,
+    "frames": 80,
+    "elapsed_seconds": 4.042,
+    "observed_fps": 19.79,
+    "cpu_seconds": 0.03938,
+    "output_bytes": 251550
+  },
+  {
+    "target_fps": 20,
+    "sample": 3,
+    "frames": 80,
+    "elapsed_seconds": 4.042,
+    "observed_fps": 19.79,
+    "cpu_seconds": 0.03906,
+    "output_bytes": 251550
+  },
+  {
+    "target_fps": 30,
+    "sample": 1,
+    "frames": 120,
+    "elapsed_seconds": 4.027,
+    "observed_fps": 29.8,
+    "cpu_seconds": 0.05569,
+    "output_bytes": 327503
+  },
+  {
+    "target_fps": 30,
+    "sample": 2,
+    "frames": 120,
+    "elapsed_seconds": 4.026,
+    "observed_fps": 29.81,
+    "cpu_seconds": 0.05559,
+    "output_bytes": 323958
+  },
+  {
+    "target_fps": 30,
+    "sample": 3,
+    "frames": 120,
+    "elapsed_seconds": 4.028,
+    "observed_fps": 29.79,
+    "cpu_seconds": 0.05753,
+    "output_bytes": 320413
+  },
+  {
+    "target_fps": 60,
+    "sample": 1,
+    "frames": 229,
+    "elapsed_seconds": 4.004,
+    "observed_fps": 57.19,
+    "cpu_seconds": 0.10117,
+    "output_bytes": 355011
+  },
+  {
+    "target_fps": 60,
+    "sample": 2,
+    "frames": 229,
+    "elapsed_seconds": 4.005,
+    "observed_fps": 57.18,
+    "cpu_seconds": 0.10053,
+    "output_bytes": 355011
+  },
+  {
+    "target_fps": 60,
+    "sample": 3,
+    "frames": 229,
+    "elapsed_seconds": 4.003,
+    "observed_fps": 57.2,
+    "cpu_seconds": 0.10055,
+    "output_bytes": 355011
+  }
+]

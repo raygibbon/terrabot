@@ -2,7 +2,6 @@
 use crate::{
     art::{self, Point},
     config::PetConfig,
-    cues::Gesture,
     motion::{ClipId, Expression, Face, MotionEvent, Timeline},
     pet::{Activity, Pet, PetEvent, Snapshot},
 };
@@ -10,43 +9,6 @@ use std::{io, time::Duration};
 use terrabox::{Canvas, Color, Style};
 use terratui::{Theme, Widget};
 
-// Original moon-moth creature: lilac coat, rounded paws, pink cheeks.
-// Palette letters are pixels, not terminal glyphs. Spaces are transparent.
-const BODY: &[&str] = &[
-    "       oo              oo",
-    "      occo            occo",
-    "      occco          occco",
-    "      obcccoooooooooccccbo",
-    "     oabccccddddddcccccbbo",
-    "    oabcccddddddddddcccbbao",
-    "   oabcccddddddddddddccbbao",
-    "   obcccfffffffffffffccbbbo",
-    "  oabccfffffffffffffffcbbbao",
-    "  obccffffffffffffffffcbbbo",
-    "  obccffffffffffffffffcbbbo",
-    "  obccffffffffffffffffcbbbo",
-    "  obccffffffffffffffffcbbbo",
-    "  obccffffffffffffffffcbbbo",
-    "  obccffffffffffffffffcbbbo",
-    "  obccffffffffffffffffcbbbo",
-    "  obccfffppffffffffppfcbbbo",
-    "  oabccffffffffffffffcbbbao",
-    "   obccfffffffffffffccbbbo",
-    "   oabccccffffffffccccbao",
-    "    oabcccccccccccccbbao",
-    "     oabbbcccccccccbbbao",
-    "      oabbbccccccbbbbao",
-    "       oabbbccccbbbbao",
-    "        oabbbbbbbbao",
-    "         ooooooooo",
-];
-#[cfg(test)]
-const FEET: [&[&str]; 4] = [
-    &[" oooo ", "occcbo", "oooooo"],
-    &[" ooo  ", "occbo ", " oooo "],
-    &["  ooo ", " occbo", " oooo "],
-    &[" oooo ", "occcbo", "oooooo"],
-];
 /// Borrowed frame sequence, reusable for full sprites or independent layers.
 pub struct AnimationClip<'a> {
     frames: &'a [&'a [&'a str]],
@@ -136,22 +98,6 @@ impl Sprite {
             self.put(x + dx, y, color);
         }
     }
-    fn oval(&mut self, p: Point, rx: i32, ry: i32, color: Color) {
-        for y in -ry..=ry {
-            for x in -rx..=rx {
-                if x * x * ry * ry + y * y * rx * rx <= rx * rx * ry * ry {
-                    self.put(p.x + x, p.y + y, color);
-                }
-            }
-        }
-    }
-    fn limb(&mut self, a: Point, b: Point, r: i32) {
-        let steps = (a.x - b.x).abs().max((a.y - b.y).abs()).max(1);
-        for i in 0..=steps {
-            let p = Point::new(a.x + (b.x - a.x) * i / steps, a.y + (b.y - a.y) * i / steps);
-            self.oval(p, r, r, ink('b').unwrap());
-        }
-    }
     /// One inside boundary on the completed opacity mask, never one per layer.
     fn outline(&mut self) {
         let mut mask = [false; art::WIDTH * art::HEIGHT];
@@ -218,6 +164,38 @@ impl Sprite {
         }
     }
 }
+fn parse_frame(text: &str) -> Sprite {
+    let mut s = Sprite::new(art::WIDTH, art::HEIGHT).unwrap();
+    let rows: Vec<_> = text.lines().collect();
+    assert_eq!(rows.len(), art::HEIGHT);
+    for (y, row) in rows.iter().enumerate() {
+        assert_eq!(row.len(), art::WIDTH);
+        for (x, c) in row.chars().enumerate() {
+            assert!(c == '.' || ink(c).is_some(), "invalid sprite symbol {c}");
+            if let Some(color) = ink(c) {
+                s.put(x as i32, y as i32, color);
+            }
+        }
+    }
+    s
+}
+fn cached_frame(shape: art::Shape) -> &'static Sprite {
+    static FRAMES: std::sync::OnceLock<Vec<Sprite>> = std::sync::OnceLock::new();
+    &FRAMES.get_or_init(|| {
+        art::Shape::ALL
+            .iter()
+            .map(|shape| {
+                let mut s = parse_frame(art::model(*shape).pixels);
+                s.outline();
+                s
+            })
+            .collect()
+    })[shape as usize]
+}
+fn cached_foreground() -> &'static Sprite {
+    static FRONT: std::sync::OnceLock<Sprite> = std::sync::OnceLock::new();
+    FRONT.get_or_init(|| parse_frame(art::model(art::Shape::Hold).foreground.unwrap()))
+}
 fn indexed(color: Color) -> Color {
     if let Color::Rgb(r, g, b) = color {
         let level = |n: u8| ((u16::from(n) * 5 + 127) / 255) as u8;
@@ -226,40 +204,27 @@ fn indexed(color: Color) -> Color {
         color
     }
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Pose {
-    pub squash: f32,
-    pub lean: f32,
     pub lift: f32,
-    pub arm: f32,
-}
-impl Default for Pose {
-    fn default() -> Self {
-        Self {
-            squash: 1.0,
-            lean: 0.0,
-            lift: 0.0,
-            arm: 0.0,
-        }
-    }
 }
 impl Pose {
     fn target(frame: crate::motion::Frame, _time: f32, intensity: f32) -> Self {
-        let amount = intensity.clamp(0.0, 1.0);
         Self {
-            squash: 1.0,
-            lean: 0.0,
-            lift: frame.lift.min(3.0) * amount,
-            arm: 0.0,
+            lift: frame.lift * intensity,
         }
     }
     fn approach(&mut self, target: Self, seconds: f32) {
-        let a = 1.0 - (-seconds.min(1.0) * 9.0).exp();
-        self.squash += (target.squash - self.squash) * a;
-        self.lean += (target.lean - self.lean) * a;
-        self.lift += (target.lift - self.lift) * a;
-        self.arm += (target.arm - self.arm) * a;
+        self.lift += (target.lift - self.lift) * (1.0 - (-seconds.min(1.0) * 9.0).exp());
     }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrbDepth {
+    Behind,
+    Side,
+    Front,
+    Held,
+    Free,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OrbState {
@@ -273,6 +238,8 @@ pub enum OrbState {
 }
 pub struct Trixie {
     pub pet: Pet,
+    pub orb_depth: OrbDepth,
+    pub last_event: Option<MotionEvent>,
     pub intensity: f32,
     pub animate: bool,
     pub palette: Palette,
@@ -290,7 +257,6 @@ pub struct Trixie {
     pub visual_x: f32,
     pub velocity: f32,
     travel_delta: f32,
-    preview_time: f32,
     orb_x: f32,
     orb_height: f32,
     orb_velocity: f32,
@@ -300,10 +266,8 @@ pub struct Trixie {
     pick_time: f32,
     transition: f32,
     previous_frame: crate::motion::Frame,
-    previous_index: usize,
     trail: [(f32, f32, f32); 6],
     trail_clock: f32,
-    pub land_flash: f32,
 }
 impl Trixie {
     pub fn new(config: PetConfig, state: Snapshot) -> Self {
@@ -311,10 +275,11 @@ impl Trixie {
         let mut pet = Pet::new(config, state);
         pet.set_hour(crate::life::local_hour());
         Self {
+            orb_depth: OrbDepth::Side,
+            last_event: None,
             visual_x: pet.x,
             velocity: 0.0,
             travel_delta: 0.0,
-            preview_time: 0.0,
             orb_x: pet.orb.x,
             orb_height: 19.0,
             orb_velocity: 0.0,
@@ -331,10 +296,8 @@ impl Trixie {
             facing_override: None,
             transition: 1.0,
             previous_frame: crate::motion::clip(ClipId::Idle).frames[0],
-            previous_index: 0,
             trail: [(pet.x, 19.0, 22.0); 6],
             trail_clock: 0.0,
-            land_flash: 0.0,
             pet,
             diagnostics,
             next_clock: std::time::Instant::now() + Duration::from_secs(60),
@@ -369,10 +332,8 @@ impl Trixie {
     }
     pub fn preview_clip(&mut self, id: ClipId) {
         self.preview = Some(id);
-        self.preview_time = 0.0;
         self.visual_x = self.pet.x;
         self.previous_frame = self.timeline.frame();
-        self.previous_index = self.timeline.index;
         self.timeline = Timeline::default();
         self.timeline.request(id, true);
         self.transition = 0.0;
@@ -387,7 +348,6 @@ impl Trixie {
     }
     pub fn step_frame(&mut self) {
         self.previous_frame = self.timeline.frame();
-        self.previous_index = self.timeline.index;
         self.timeline.step_frame();
         self.transition = 0.0;
         self.update_pose(0.05);
@@ -410,36 +370,11 @@ impl Trixie {
             }
             self.orb_held = false;
         }
-        let gait = matches!(self.timeline.id, ClipId::Walk | ClipId::Run);
         if self.animate {
-            if gait {
-                let travel = if self.preview.is_some() {
-                    let old = self.visual_x;
-                    self.preview_time += elapsed.as_secs_f32();
-                    let frequency = if self.timeline.id == ClipId::Run {
-                        0.8
-                    } else {
-                        0.4
-                    };
-                    self.visual_x = 0.5 + (self.preview_time * frequency).sin() * 0.04;
-                    self.velocity = (self.visual_x - old) / elapsed.as_secs_f32().max(0.001);
-                    self.visual_x - old
-                } else {
-                    self.travel_delta
-                };
-                let stride = if self.timeline.id == ClipId::Run {
-                    0.10
-                } else {
-                    0.08
-                };
-                self.timeline.advance_distance(travel, stride);
-            } else {
-                self.timeline.advance(elapsed);
-            }
+            self.timeline.advance(elapsed);
         }
         if old_id != self.timeline.id || old_index != self.timeline.index {
             self.previous_frame = old_frame;
-            self.previous_index = old_index;
             self.transition = 0.0;
         }
         self.update_pose(elapsed.as_secs_f32().min(1.0));
@@ -447,6 +382,7 @@ impl Trixie {
     fn update_pose(&mut self, dt: f32) {
         let amount = if self.animate { self.intensity } else { 0.0 };
         for event in self.timeline.drain_events() {
+            self.last_event = Some(event);
             match event {
                 MotionEvent::Catch => {
                     self.orb_held = true;
@@ -458,7 +394,7 @@ impl Trixie {
                     self.orb_velocity = 22.0;
                     self.orb_state = OrbState::Thrown;
                 }
-                MotionEvent::Land | MotionEvent::Step => self.land_flash = 1.0,
+                MotionEvent::Land => {}
                 _ => {}
             }
         }
@@ -468,18 +404,11 @@ impl Trixie {
             self.orb_velocity = 0.0;
         }
         self.transition = (self.transition + dt * 12.5).min(1.0);
-        let mut target = Pose::target(
+        let target = Pose::target(
             self.timeline.frame(),
             self.timeline.total_ms as f32 / 1000.0,
             amount,
         );
-        if !self.pet.thinking && !self.pet.speaking && !self.pet.gentle {
-            match self.pet.gesture {
-                Gesture::HeadTilt => target.lean += 2.0 * amount,
-                Gesture::Nod => target.squash += (self.face.clock * 5.0).sin() * 0.025 * amount,
-                _ => {}
-            }
-        }
         self.pose.approach(target, dt);
         self.face.advance(
             &self.pet,
@@ -489,10 +418,9 @@ impl Trixie {
         if self.preview.is_none() {
             self.visual_x = self.pet.x;
         }
-        self.land_flash = (self.land_flash - dt * 4.0).max(0.0);
         let anchor = self.orb_anchor();
         let offset = anchor.x as f32 - art::ORIGIN.x as f32;
-        let height = art::ORIGIN.y as f32 - anchor.y as f32 + self.pose.lift.round();
+        let height = art::ORIGIN.y as f32 - anchor.y as f32 + self.root_lift() as f32;
         let ease = 1.0 - (-dt * 12.0).exp();
         match self.orb_state {
             OrbState::Picking => {
@@ -525,7 +453,11 @@ impl Trixie {
             OrbState::Resting | OrbState::Floating => {
                 let sleeping = self.timeline.id == ClipId::Sleep;
                 let playful = matches!(self.timeline.id, ClipId::Curious | ClipId::Bored);
-                let h = if sleeping || self.timeline.id == ClipId::Play {
+                let orbit = self.timeline.id == ClipId::Curious && amount > 0.0;
+                let phase = self.timeline.total_ms as f32 / 1000.0 * 1.1;
+                let h = if orbit {
+                    14.0 + 6.0 * phase.sin()
+                } else if sleeping || self.timeline.id == ClipId::Play {
                     3.0
                 } else if playful {
                     8.0 + (self.face.clock * 2.0).sin().abs() * 5.0 * amount
@@ -533,7 +465,13 @@ impl Trixie {
                     19.0 + (self.face.clock * 1.5).sin() * amount
                 };
                 let x = self.visual_x;
-                let side = if self.facing() < 0.0 { -22.0 } else { 22.0 };
+                let side = if orbit {
+                    22.0 * phase.cos()
+                } else if self.facing() < 0.0 {
+                    -22.0
+                } else {
+                    22.0
+                };
                 self.orb_state = if h > 3.1 {
                     OrbState::Floating
                 } else {
@@ -544,9 +482,29 @@ impl Trixie {
                 self.orb_height += (h - self.orb_height).clamp(-28.0 * dt, 28.0 * dt);
             }
         }
+        self.orb_depth = match self.orb_state {
+            OrbState::Held => OrbDepth::Held,
+            OrbState::Thrown | OrbState::Bouncing | OrbState::Returning => OrbDepth::Free,
+            OrbState::Picking => OrbDepth::Front,
+            _ if self.timeline.id == ClipId::Curious && amount > 0.0 => {
+                if (self.timeline.total_ms as f32 / 1000.0 * 1.1).sin() >= 0.0 {
+                    OrbDepth::Behind
+                } else {
+                    OrbDepth::Front
+                }
+            }
+            // An interruption must not reveal a rear orb through the body.
+            // Retain its current depth until the eased path clears the silhouette.
+            _ if self.orb_offset.abs() < 19.0
+                && matches!(self.orb_depth, OrbDepth::Behind | OrbDepth::Front) =>
+            {
+                self.orb_depth
+            }
+            _ => OrbDepth::Side,
+        };
         self.orb_height = self.orb_height.clamp(3.0, 40.0);
         if !self.pet.thinking && !self.pet.speaking {
-            let target = ((self.orb_x - self.visual_x) * 4.0).clamp(-1.0, 1.0);
+            let target = (self.orb_offset / 22.0).clamp(-1.0, 1.0);
             self.face.gaze += (target - self.face.gaze) * (dt * 8.0).min(1.0);
         }
         self.trail_clock += dt;
@@ -559,9 +517,10 @@ impl Trixie {
     pub fn label(&self) -> String {
         if let Some(id) = self.preview {
             return format!(
-                "{id:?} · frame {} · {}ms · {:.1}x{}",
+                "{id:?} · frame {} · {}/{}ms · {:.1}x{}",
                 self.timeline.index + 1,
                 self.timeline.elapsed_ms,
+                self.timeline.frame().ms,
                 self.speed,
                 if self.paused { " · paused" } else { "" }
             );
@@ -610,39 +569,31 @@ impl Trixie {
             },
         )
     }
-    fn contacts(&self, frame: crate::motion::Frame) -> ([Point; 2], [Point; 2]) {
-        let mut hands = frame
-            .arms
-            .map(|(x, y)| Point::new((x + 4).clamp(4, 31), (y + 4).clamp(8, 29)));
-        if self.pet.gesture == Gesture::Wave
-            && !self.pet.thinking
-            && !self.pet.speaking
-            && !self.pet.gentle
-        {
-            hands[1] = Point::new(31, 12);
+    fn model(&self) -> art::Model {
+        art::model(self.timeline.frame().shape)
+    }
+    fn root_lift(&self) -> i32 {
+        if !self.animate || self.intensity == 0.0 {
+            return 2;
         }
-        let model = art::model(frame.shape, BODY);
-        for (i, hand) in hands.iter_mut().enumerate() {
-            let shoulder = model.shoulders[i];
-            // Short soft arms: the endpoint stays within a small reach of its socket.
-            hand.x = hand.x.clamp(shoulder.x - 4, shoulder.x + 4);
-            hand.y = hand.y.clamp(shoulder.y - 8, shoulder.y + 6).min(28);
-        }
-        let feet = frame
-            .feet
-            .map(|(x, y)| Point::new((x + 5).clamp(11, 25), (y + 2).min(28)));
-        (hands, feet)
+        let amount = if self.animate { self.intensity } else { 0.0 };
+        let rate = if self.timeline.id == ClipId::Sleep {
+            0.45
+        } else {
+            0.9
+        };
+        // Stable base levitation; reduced motion keeps the same resting altitude.
+        (2.0 + self.pose.lift + (self.face.clock * rate).sin() * amount).round() as i32
     }
     fn orb_anchor(&self) -> Point {
-        let (hands, _) = self.contacts(self.timeline.frame());
-        let x = hands[1].x + 3;
+        let a = self.model().orb;
         Point::new(
             if self.facing() < 0.0 {
-                art::WIDTH as i32 - 1 - x
+                art::WIDTH as i32 - 1 - a.x
             } else {
-                x
+                a.x
             },
-            hands[1].y - 2,
+            a.y,
         )
     }
     fn orb_position(&self, width: usize, ground: i32) -> Point {
@@ -650,7 +601,7 @@ impl Trixie {
             let a = self.orb_anchor();
             Point::new(
                 self.root_x(width) + a.x,
-                ground - art::ORIGIN.y - self.pose.lift.round() as i32 + a.y,
+                ground - art::ORIGIN.y - self.root_lift() as f32 as i32 + a.y,
             )
         } else {
             Point::new(
@@ -669,29 +620,19 @@ impl Trixie {
     fn body(
         &self,
         frame: crate::motion::Frame,
-        _foot_index: usize,
+        _frame_index: usize,
     ) -> Result<Sprite, &'static str> {
-        let mut body = Sprite::new(art::WIDTH, art::HEIGHT).ok_or("Invalid sprite bounds")?;
-        let model = art::model(frame.shape, BODY);
-        let (hands, feet) = self.contacts(frame);
-        // Back limbs attach to the same model anchors. Torso covers shoulder/hip seams.
-        for i in 0..2 {
-            body.limb(model.shoulders[i], hands[i], 2);
-            body.limb(model.hips[i], feet[i], 2);
-            body.oval(feet[i], 3, 2, ink('b').unwrap());
-            body.line(feet[i].x - 1, feet[i].y - 1, 3, ink('c').unwrap());
-        }
-        body.art(model.art, model.offset.x, model.offset.y);
-        // Foreground hands use lilac separation, not independently black outlines.
-        for hand in hands {
-            body.oval(hand, 2, 2, ink('c').unwrap());
-            // A broad mitten highlight reads as one rounded paw, not a stray speck.
-            body.line(hand.x - 1, hand.y, 2, ink('d').unwrap());
-        }
+        let mut body = cached_frame(frame.shape).clone();
+        let model = art::model(frame.shape);
         let eye = Color::Rgb(46, 55, 85);
         let light = Color::Rgb(251, 248, 255);
-        let sleep = self.timeline.id == ClipId::Sleep && self.timeline.index >= 2;
-        let expression = self.face.expression;
+        let sleep = (self.timeline.id == ClipId::Sleep && self.timeline.index >= 1)
+            || (self.timeline.id == ClipId::Wake && self.timeline.index == 0);
+        let expression = if self.timeline.id == ClipId::Wake && self.timeline.index == 1 {
+            Expression::Sleepy
+        } else {
+            self.face.expression
+        };
         let facing = self.facing();
         for (i, anchor) in model.eyes.iter().enumerate() {
             let cx = anchor.x;
@@ -750,7 +691,6 @@ impl Trixie {
             body.line(15, 21, 2, eye);
             body.put(15, 23, eye);
         }
-        body.outline();
         Ok(body)
     }
     pub fn compose(&self, width: usize, height: usize) -> Result<Sprite, &'static str> {
@@ -763,7 +703,6 @@ impl Trixie {
             return Ok(world);
         }
         let ground = height as i32 - 3;
-        let low = Color::Rgb(52, 65, 87);
         let body = self.body(self.timeline.frame(), self.timeline.index)?;
         let facing = self.facing();
         let t = if self.animate { self.face.clock } else { 0.0 };
@@ -771,22 +710,27 @@ impl Trixie {
         let sleep = self.timeline.id == ClipId::Sleep && self.timeline.index >= 2;
         // Integer-only placement: no resampling, shearing, colour blending or scale morph.
         let x0 = self.root_x(width);
-        let lift = self.pose.lift.round().max(0.0) as i32;
-        let root_y = ground - art::ORIGIN.y - lift;
-        let shadow_half = (10 - lift / 3).max(6);
+        let lift = self.root_lift();
+        let root_y = ground - self.model().origin.y - lift;
+        let shadow_half = (7 - lift / 3).max(4);
         world.line(
             x0 + art::ORIGIN.x - shadow_half,
             ground - 1,
             shadow_half * 2,
-            Color::Rgb(28, 33, 51),
+            Color::Rgb(24, 29, 43),
         );
-        for y in 0..art::HEIGHT {
-            for x in 0..art::WIDTH {
-                let source_x = if facing < 0.0 { art::WIDTH - 1 - x } else { x };
-                if let Some(color) = body.get(source_x, y) {
-                    world.put(x0 + x as i32, root_y + y as i32, color);
+        let draw_character = |world: &mut Sprite| {
+            for y in 0..art::HEIGHT {
+                for x in 0..art::WIDTH {
+                    let source_x = if facing < 0.0 { art::WIDTH - 1 - x } else { x };
+                    if let Some(color) = body.get(source_x, y) {
+                        world.put(x0 + x as i32, root_y + y as i32, color);
+                    }
                 }
             }
+        };
+        if self.orb_depth != OrbDepth::Behind {
+            draw_character(&mut world);
         }
         let play = !self.pet.moving
             && matches!(
@@ -815,7 +759,7 @@ impl Trixie {
                 218,
             )
         };
-        // Compact luminous orb. Never paint its halo over the character.
+        // One orb draw: behind/side/front/held all use the same authoritative position.
         for dy in -3i32..=3 {
             for dx in -3i32..=3 {
                 let radius = dx * dx + dy * dy;
@@ -824,9 +768,6 @@ impl Trixie {
                 }
                 let px = orb_x as i32 + dx;
                 let py = orb_y as i32 + dy;
-                if world.get(px as usize, py as usize).is_some() {
-                    continue;
-                }
                 let color = if radius >= 8 {
                     Color::Rgb(24, 103, 115)
                 } else if dx == 0 && dy == 0 {
@@ -837,6 +778,20 @@ impl Trixie {
                     glow
                 };
                 world.put(px, py, color);
+            }
+        }
+        if self.orb_depth == OrbDepth::Behind {
+            draw_character(&mut world);
+        }
+        if self.orb_depth == OrbDepth::Held && self.model().foreground.is_some() {
+            let foreground = cached_foreground();
+            for y in 0..art::HEIGHT {
+                for x in 0..art::WIDTH {
+                    let sx = if facing < 0.0 { art::WIDTH - 1 - x } else { x };
+                    if let Some(color) = foreground.get(sx, y) {
+                        world.put(x0 + x as i32, root_y + y as i32, color);
+                    }
+                }
             }
         }
         // Six retained trail samples; no per-frame particle allocation.
@@ -866,12 +821,8 @@ impl Trixie {
                     world.put(x, y, Color::Rgb(49, 76, 85));
                 }
             }
-            if self.land_flash > 0.0 {
-                for dx in [-3, 0, 29, 33] {
-                    world.put(x0 + dx, ground - 2, low);
-                }
-            }
         }
+
         if self.guides {
             let guide = Color::Rgb(90, 100, 120);
             for x in 0..art::WIDTH as i32 {
@@ -883,8 +834,8 @@ impl Trixie {
                 world.put(x0 + art::WIDTH as i32 - 1, root_y + y, guide);
             }
             world.line(0, ground, width as i32, guide);
-            let model = art::model(self.timeline.frame().shape, BODY);
-            let (hands, feet) = self.contacts(self.timeline.frame());
+            let model = art::model(self.timeline.frame().shape);
+            let hands = model.arms;
             for (p, color) in [
                 (art::ORIGIN, Color::Rgb(255, 190, 80)),
                 (model.eyes[0], Color::Rgb(80, 200, 255)),
@@ -892,8 +843,6 @@ impl Trixie {
                 (model.mouth, Color::Rgb(80, 200, 255)),
                 (hands[0], Color::Rgb(111, 226, 208)),
                 (hands[1], Color::Rgb(111, 226, 208)),
-                (feet[0], Color::Rgb(246, 157, 171)),
-                (feet[1], Color::Rgb(246, 157, 171)),
             ] {
                 let x = x0
                     + if facing < 0.0 {
@@ -911,8 +860,8 @@ impl Trixie {
         if sleep {
             world.art(
                 &["eeeee", "   e ", "  e  ", " e   ", "eeeee"],
-                x0 + 26,
-                ground - 24,
+                x0 + 33,
+                ground - 29,
             );
         }
         Ok(world)
@@ -949,9 +898,14 @@ impl Widget for Trixie {
                         0,
                         0,
                         &format!(
-                            "{:?} #{} v={:.3}/s home={:+.2} scale=1:{scale}",
+                            "{:?} #{} clip={}ms v={:.3}/s home={:+.2} scale=1:{scale}",
                             self.timeline.id,
                             self.timeline.index + 1,
+                            crate::motion::clip(self.timeline.id)
+                                .frames
+                                .iter()
+                                .map(|f| f.ms)
+                                .sum::<u32>(),
                             self.velocity,
                             self.visual_x - 0.5
                         ),
@@ -961,7 +915,7 @@ impl Widget for Trixie {
                         0,
                         1,
                         &format!(
-                            "{:?}->{:?} {} · orb {:?}",
+                            "{:?}->{:?} {} · {:?}/{:?} · {:?}",
                             self.previous_frame.shape,
                             self.timeline.frame().shape,
                             if self.transition < 1.0 {
@@ -969,7 +923,9 @@ impl Widget for Trixie {
                             } else {
                                 "held"
                             },
-                            self.orb_state
+                            self.orb_state,
+                            self.orb_depth,
+                            self.last_event
                         ),
                         theme.bar,
                     );
@@ -1017,6 +973,134 @@ mod tests {
     use super::*;
     use terrabox::{Rect, Size, Surface};
     #[test]
+    fn authored_frames_have_stable_anchors_and_no_lower_appendages() {
+        for shape in art::Shape::ALL {
+            let model = art::model(shape);
+            let body = cached_frame(shape);
+            assert_eq!(model.origin, art::ORIGIN);
+            for a in model
+                .eyes
+                .into_iter()
+                .chain([model.mouth])
+                .chain(model.arms)
+            {
+                assert!(
+                    body.get(a.x as usize, a.y as usize).is_some(),
+                    "anchor outside {shape:?}: {a:?}"
+                );
+            }
+            for x in [10, 11, 25, 26] {
+                assert_eq!(body.get(x, 19), ink('p'), "cheek alignment {shape:?}");
+            }
+            // The lower body tapers into one continuous tip, never split feet.
+            for y in 24..art::HEIGHT {
+                let xs: Vec<_> = (0..art::WIDTH)
+                    .filter(|x| body.get(*x, y).is_some())
+                    .collect();
+                if let (Some(first), Some(last)) = (xs.first(), xs.last()) {
+                    assert_eq!(
+                        xs.len(),
+                        last - first + 1,
+                        "split lower silhouette {shape:?}"
+                    );
+                }
+                if y >= 28 {
+                    assert!(xs.is_empty(), "leg/foot pixels below floating body");
+                }
+            }
+        }
+    }
+    #[test]
+    fn orb_layers_occlude_in_both_directions_and_holding_arms_cover_rim() {
+        let mut t = default_trixie();
+        t.animate = false;
+        t.orb_x = t.visual_x;
+        t.orb_offset = 0.0;
+        t.orb_height = 15.0;
+        t.orb_state = OrbState::Floating;
+        let p = t.orb_position(64, 41);
+        t.orb_depth = OrbDepth::Behind;
+        let behind = t.compose(64, 44).unwrap();
+        let body = t.body(t.timeline.frame(), 0).unwrap();
+        assert_eq!(behind.get(p.x as usize, p.y as usize), body.get(18, 18));
+        t.orb_depth = OrbDepth::Front;
+        let front = t.compose(64, 44).unwrap();
+        assert_eq!(
+            front.get(p.x as usize, p.y as usize),
+            Some(Color::Rgb(251, 248, 255))
+        );
+        assert_ne!(
+            behind.get(p.x as usize, p.y as usize),
+            front.get(p.x as usize, p.y as usize)
+        );
+        t.preview_clip(ClipId::Play);
+        t.timeline.index = 2;
+        t.orb_state = OrbState::Held;
+        t.orb_depth = OrbDepth::Held;
+        for facing in [-1.0, 1.0] {
+            t.facing_override = Some(facing);
+            let held = t.compose(64, 44).unwrap();
+            let orb = t.orb_position(64, 41);
+            assert_eq!(
+                held.get(orb.x as usize, orb.y as usize),
+                Some(Color::Rgb(251, 248, 255))
+            );
+            // The lower rim lies behind an explicitly authored foreground hand.
+            let px = if facing < 0.0 { 35 - 27 } else { 27 };
+            assert_eq!(
+                held.get(
+                    (t.root_x(64) + px) as usize,
+                    (41 - art::ORIGIN.y - t.root_lift() + 22) as usize
+                ),
+                cached_foreground().get(27, 22)
+            );
+            assert!(cached_foreground().get(27, 22).is_some());
+        }
+    }
+    #[test]
+    fn orbit_depth_crossings_are_local_and_reduced_motion_is_still() {
+        let mut t = default_trixie();
+        t.preview_clip(ClipId::Curious);
+        let mut depths = Vec::new();
+        let mut last = t.orb_position(64, 41);
+        for _ in 0..650 {
+            t.advance(Duration::from_millis(10));
+            let p = t.orb_position(64, 41);
+            assert!((p.x - last.x).abs() <= 1 && (p.y - last.y).abs() <= 1);
+            depths.push(t.orb_depth);
+            last = p;
+        }
+        assert!(depths.contains(&OrbDepth::Behind) && depths.contains(&OrbDepth::Front));
+        t.intensity = 0.0;
+        t.preview_clip(ClipId::Idle);
+        for _ in 0..100 {
+            t.advance(Duration::from_millis(20));
+            assert_eq!(t.root_lift(), 2);
+        }
+    }
+    #[test]
+    fn interrupted_orbit_keeps_rear_depth_until_it_reaches_the_side() {
+        let mut t = default_trixie();
+        t.preview_clip(ClipId::Curious);
+        for _ in 0..140 {
+            t.advance(Duration::from_millis(10));
+        }
+        assert_eq!(t.orb_depth, OrbDepth::Behind);
+        assert!(t.orb_offset.abs() < 10.0);
+        t.preview_clip(ClipId::Think);
+        let mut cleared = false;
+        for _ in 0..100 {
+            t.advance(Duration::from_millis(10));
+            if t.orb_offset.abs() < 19.0 {
+                assert_eq!(t.orb_depth, OrbDepth::Behind);
+            } else {
+                assert_eq!(t.orb_depth, OrbDepth::Side);
+                cleared = true;
+            }
+        }
+        assert!(cleared);
+    }
+    #[test]
     fn body_palette_and_original_open_eyes_are_preserved() {
         let mut t = default_trixie();
         t.animate = false;
@@ -1040,7 +1124,7 @@ mod tests {
         t.face.gaze = 0.0;
         let frame = t.timeline.frame();
         let body = t.body(frame, 0).unwrap();
-        for anchor in art::model(frame.shape, BODY).eyes {
+        for anchor in art::model(frame.shape).eyes {
             for y in 0..5 {
                 for x in 0..4 {
                     let highlight = (x == 1 && y < 2) || (x == 2 && y == 4);
@@ -1057,7 +1141,7 @@ mod tests {
         }
         t.face.expression = Expression::Happy;
         let body = t.body(frame, 0).unwrap();
-        for anchor in art::model(frame.shape, BODY).eyes {
+        for anchor in art::model(frame.shape).eyes {
             for x in 0..4 {
                 assert_eq!(
                     body.get((anchor.x + x) as usize, (anchor.y + 2) as usize),
@@ -1074,7 +1158,7 @@ mod tests {
             for index in 0..crate::motion::clip(id).frames.len() {
                 t.timeline.index = index;
                 let frame = t.timeline.frame();
-                let model = art::model(frame.shape, BODY);
+                let model = art::model(frame.shape);
                 for expression in Expression::ALL {
                     t.face.expression = expression;
                     let body = t.body(frame, index).unwrap();
@@ -1101,12 +1185,16 @@ mod tests {
         t.orb_x = t.visual_x;
         t.orb_offset = 0.0;
         t.orb_height = 16.0;
+        t.orb_depth = OrbDepth::Behind;
         let world = t.compose(64, 44).unwrap();
         let body = t.body(t.timeline.frame(), 0).unwrap();
         for y in 0..art::HEIGHT {
             for x in 0..art::WIDTH {
                 if let Some(color) = body.get(x, y) {
-                    assert_eq!(world.get(t.root_x(64) as usize + x, 10 + y), Some(color));
+                    assert_eq!(
+                        world.get(t.root_x(64) as usize + x, (10 - t.root_lift()) as usize + y),
+                        Some(color)
+                    );
                 }
             }
         }
@@ -1202,18 +1290,14 @@ mod tests {
                 let p = t.orb_position(110, 45);
                 if t.orb_state == OrbState::Held {
                     held = true;
-                    let (hands, _) = t.contacts(t.timeline.frame());
-                    let center = hands[1].x + 3;
+                    let anchor = t.model().orb;
                     let x = if facing < 0.0 {
-                        art::WIDTH as i32 - 1 - center
+                        art::WIDTH as i32 - 1 - anchor.x
                     } else {
-                        center
+                        anchor.x
                     };
                     assert_eq!(p.x, t.root_x(110) + x);
-                    assert_eq!(
-                        p.y,
-                        45 - art::ORIGIN.y - t.pose.lift.round() as i32 + hands[1].y - 2
-                    );
+                    assert_eq!(p.y, 45 - art::ORIGIN.y - t.root_lift() + anchor.y);
                 }
                 if old_state == OrbState::Held && t.orb_state == OrbState::Thrown {
                     released = true;
@@ -1260,7 +1344,7 @@ mod tests {
         assert!(caught && thrown);
     }
     #[test]
-    fn authored_silhouettes_and_walk_contacts_differ() {
+    fn authored_floating_silhouettes_differ() {
         let mut t = default_trixie();
         let mut images = Vec::new();
         for id in [ClipId::Idle, ClipId::Sit, ClipId::Sleep] {
@@ -1273,21 +1357,21 @@ mod tests {
         assert_ne!(images[0], images[1]);
         assert_ne!(images[1], images[2]);
         let c = crate::motion::clip(ClipId::Walk);
-        assert_ne!(c.frames[0].feet, c.frames[2].feet);
-        assert_ne!(c.frames[0].arms, c.frames[2].arms);
+        assert_ne!(c.frames[0].shape, c.frames[1].shape);
     }
     #[test]
     fn frame_clips_loop_or_hold_last_frame() {
-        let clip = AnimationClip::new(&FEET, Duration::from_millis(100), true).unwrap();
-        assert_eq!(clip.frame(Duration::from_millis(100)), FEET[1]);
-        assert_eq!(clip.frame(Duration::from_millis(400)), FEET[0]);
-        let clip = AnimationClip::new(&FEET, Duration::from_millis(100), false).unwrap();
-        assert_eq!(clip.frame(Duration::from_secs(10)), FEET[3]);
-        assert!(AnimationClip::new(&FEET, Duration::ZERO, true).is_none());
+        let frames: [&[&str]; 4] = [&["o"], &["b"], &["c"], &["d"]];
+        let clip = AnimationClip::new(&frames, Duration::from_millis(100), true).unwrap();
+        assert_eq!(clip.frame(Duration::from_millis(100)), frames[1]);
+        assert_eq!(clip.frame(Duration::from_millis(400)), frames[0]);
+        let clip = AnimationClip::new(&frames, Duration::from_millis(100), false).unwrap();
+        assert_eq!(clip.frame(Duration::from_secs(10)), frames[3]);
+        assert!(AnimationClip::new(&frames, Duration::ZERO, true).is_none());
     }
     #[test]
     fn artwork_bounds_and_no_simulation_in_render() {
-        assert!(BODY.iter().all(|r| r.len() <= 32));
+        assert_eq!(art::WIDTH, 36);
         let mut t = default_trixie();
         for a in Activity::ALL {
             t.pet.demo_activity(a);
@@ -1329,7 +1413,7 @@ mod tests {
         t.pet.demo_activity(Activity::Sleep);
         t.advance(Duration::from_millis(50));
         assert_eq!(t.timeline.id, ClipId::Sleep);
-        assert!(t.pose.squash.is_finite());
+        assert!(t.pose.lift.is_finite());
         t.intensity = f32::NAN;
         assert!(t.compose(40, 40).is_err());
     }

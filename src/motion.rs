@@ -46,6 +46,16 @@ impl ClipId {
         if p.thinking {
             return Self::Think;
         }
+        if !p.gentle {
+            match p.gesture {
+                crate::cues::Gesture::Wave | crate::cues::Gesture::HeadTilt => {
+                    return Self::Curious;
+                }
+                crate::cues::Gesture::Nod => return Self::Sit,
+                crate::cues::Gesture::Celebrate => return Self::Celebrate,
+                crate::cues::Gesture::None => {}
+            }
+        }
         if p.moving {
             return Self::Walk;
         }
@@ -70,18 +80,9 @@ pub enum Playback {
     Once,
     PingPong,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Shape {
-    Stand,
-    Crouch,
-    Run,
-    Seat,
-    Curl,
-    Stretch,
-}
+pub use crate::art::Shape;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MotionEvent {
-    Step,
     Takeoff,
     Land,
     Release,
@@ -92,308 +93,113 @@ pub enum MotionEvent {
 pub struct Frame {
     pub ms: u32,
     pub shape: Shape,
-    pub lean: f32,
     pub lift: f32,
-    pub squash: f32,
-    pub arms: [(i32, i32); 2],
-    pub feet: [(i32, i32); 2],
     pub event: Option<MotionEvent>,
 }
-#[allow(clippy::too_many_arguments)] // Authored frame table: time, silhouette, pose, contacts, event.
-const fn f(
-    ms: u32,
-    shape: Shape,
-    lean: f32,
-    lift: f32,
-    squash: f32,
-    arms: [(i32, i32); 2],
-    feet: [(i32, i32); 2],
-    event: Option<MotionEvent>,
-) -> Frame {
+const fn f(ms: u32, shape: Shape, lift: f32, event: Option<MotionEvent>) -> Frame {
     Frame {
         ms,
         shape,
-        lean,
         lift,
-        squash,
-        arms,
-        feet,
         event,
     }
 }
-const ST: Shape = Shape::Stand;
-const SE: Shape = Shape::Seat;
-const CR: Shape = Shape::Crouch;
-const RN: Shape = Shape::Run;
-const CU: Shape = Shape::Curl;
-const SX: Shape = Shape::Stretch;
-const DOWN: [(i32, i32); 2] = [(2, 19), (25, 19)];
-const UP: [(i32, i32); 2] = [(0, 8), (28, 7)];
-const FEET: [(i32, i32); 2] = [(7, 27), (20, 27)];
+use Shape::{
+    Droop as D, Hold as H, Peek as P, Reach as E, Relax as R, Rise as U, Sleep as S, Stretch as X,
+};
 const IDLE: &[Frame] = &[
-    f(900, ST, 0., 0., 1., DOWN, FEET, None),
-    f(500, ST, -0.4, 0., 1.02, DOWN, FEET, None),
-    f(900, ST, 0.4, 0., 1., DOWN, FEET, None),
+    f(1800, R, 0., None),
+    f(800, D, 0., None),
+    f(1800, R, 0., None),
 ];
+// Legacy Walk/Run names now mean a local glide: no steps or foot contacts.
 const WALK: &[Frame] = &[
-    f(
-        120,
-        ST,
-        0.,
-        0.,
-        1.,
-        [(1, 17), (27, 20)],
-        [(7, 27), (20, 25)],
-        Some(MotionEvent::Step),
-    ),
-    f(
-        100,
-        ST,
-        0.,
-        0.,
-        1.,
-        [(1, 18), (27, 18)],
-        [(5, 27), (17, 24)],
-        None,
-    ),
-    f(
-        120,
-        ST,
-        0.,
-        0.,
-        1.,
-        [(1, 20), (27, 17)],
-        [(6, 25), (19, 27)],
-        Some(MotionEvent::Step),
-    ),
-    f(
-        100,
-        ST,
-        0.,
-        0.,
-        1.,
-        [(1, 18), (27, 18)],
-        [(9, 24), (17, 27)],
-        None,
-    ),
+    f(700, R, 0., None),
+    f(600, E, 1., None),
+    f(900, R, 0., None),
 ];
 const RUN: &[Frame] = &[
-    f(
-        75,
-        RN,
-        0.,
-        0.,
-        0.93,
-        [(1, 13), (27, 22)],
-        [(3, 27), (24, 23)],
-        Some(MotionEvent::Step),
-    ),
-    f(
-        65,
-        RN,
-        0.,
-        2.,
-        1.,
-        [(0, 15), (27, 20)],
-        [(10, 23), (17, 22)],
-        None,
-    ),
-    f(
-        75,
-        RN,
-        0.,
-        0.,
-        0.93,
-        [(0, 22), (28, 13)],
-        [(8, 23), (24, 27)],
-        Some(MotionEvent::Step),
-    ),
-    f(
-        65,
-        RN,
-        0.,
-        2.,
-        1.,
-        [(1, 20), (27, 15)],
-        [(9, 22), (18, 23)],
-        None,
-    ),
+    f(400, E, 1., None),
+    f(500, U, 2., None),
+    f(800, R, 0., None),
 ];
 const JUMP: &[Frame] = &[
-    f(220, CR, 0., 0., 1.0, [(1, 23), (27, 23)], FEET, None),
-    f(100, ST, 0., 2., 1.06, UP, FEET, Some(MotionEvent::Takeoff)),
-    f(180, ST, 0., 7., 1., UP, [(6, 24), (21, 24)], None),
-    f(
-        180,
-        ST,
-        0.,
-        8.,
-        1.,
-        [(0, 13), (28, 13)],
-        [(5, 24), (22, 24)],
-        None,
-    ),
-    f(120, ST, 0., 3., 1., DOWN, FEET, None),
-    f(
-        130,
-        CR,
-        0.,
-        0.,
-        0.94,
-        [(0, 23), (28, 23)],
-        [(5, 27), (22, 27)],
-        Some(MotionEvent::Land),
-    ),
-    f(220, ST, 0., 0., 1., DOWN, FEET, None),
+    f(300, D, 0., None),
+    f(250, U, 2., Some(MotionEvent::Takeoff)),
+    f(350, U, 3., None),
+    f(300, R, 1., Some(MotionEvent::Land)),
+    f(600, R, 0., None),
 ];
 const SIT: &[Frame] = &[
-    f(180, CR, 0., 0., 1.0, DOWN, FEET, None),
-    f(
-        220,
-        SE,
-        0.,
-        0.,
-        1.,
-        [(1, 22), (27, 22)],
-        [(4, 27), (23, 27)],
-        None,
-    ),
-    f(
-        1100,
-        SE,
-        0.,
-        0.,
-        1.,
-        [(4, 23), (24, 23)],
-        [(4, 27), (23, 27)],
-        None,
-    ),
+    f(400, R, 0., None),
+    f(700, D, 0., None),
+    f(1800, S, 0., None),
 ];
 const SLEEP: &[Frame] = &[
-    f(180, CR, 0., 0., 1., DOWN, FEET, None),
-    f(260, SE, 0., 0., 1., [(4, 23), (24, 23)], FEET, None),
-    f(400, CU, 0., 0., 1., [(7, 24), (23, 24)], FEET, None),
-    f(
-        1800,
-        CU,
-        0.,
-        0.,
-        1.,
-        [(9, 24), (22, 24)],
-        [(7, 27), (21, 27)],
-        None,
-    ),
-    f(
-        1800,
-        CU,
-        0.,
-        0.,
-        1.,
-        [(9, 23), (22, 23)],
-        [(7, 27), (21, 27)],
-        None,
-    ),
+    f(500, D, 0., None),
+    f(700, S, 0., None),
+    f(2200, S, 0., None),
+    f(2200, D, 0., None),
 ];
 const WAKE: &[Frame] = &[
-    f(280, CU, 0., 0., 1., [(9, 24), (22, 24)], FEET, None),
-    f(280, SE, 0., 0., 1., [(4, 23), (24, 23)], FEET, None),
-    f(220, CR, 0., 0., 1., [(2, 16), (27, 16)], FEET, None),
-    f(450, SX, 0., 0., 1., UP, FEET, None),
-    f(180, CR, 0., 0., 1., [(0, 13), (28, 13)], FEET, None),
-    f(300, ST, 0., 0., 1., DOWN, FEET, None),
+    f(500, S, 0., None),
+    f(450, D, 0., None),
+    f(500, E, 1., None),
+    f(500, X, 2., None),
+    f(400, U, 1., None),
+    f(1000, R, 0., None),
 ];
 const THINK: &[Frame] = &[
-    f(600, ST, -1., 0., 1., [(3, 14), (26, 19)], FEET, None),
-    f(800, ST, 1.5, 0., 1., [(5, 13), (26, 19)], FEET, None),
-    f(500, ST, 1., 0., 1., [(4, 14), (26, 19)], FEET, None),
+    f(900, P, 0., None),
+    f(1200, E, 0., None),
+    f(900, P, 0., None),
 ];
 const TALK: &[Frame] = &[
-    f(220, ST, 0., 0., 1., [(0, 19), (27, 16)], FEET, None),
-    f(180, ST, 0.4, 0., 1., [(0, 19), (28, 15)], FEET, None),
-    f(260, ST, 0., 0., 1., DOWN, FEET, None),
+    f(500, R, 0., None),
+    f(450, E, 0., None),
+    f(900, R, 0., None),
 ];
 const HAPPY: &[Frame] = &[
-    f(240, CR, 0., 0., 1., DOWN, FEET, None),
-    f(240, ST, 0., 2., 1., UP, FEET, None),
-    f(220, CR, 0., 0., 1., DOWN, FEET, Some(MotionEvent::Land)),
-    f(1400, ST, 0., 0., 1., DOWN, FEET, None),
+    f(300, D, 0., None),
+    f(500, U, 2., None),
+    f(400, E, 1., None),
+    f(1400, R, 0., None),
 ];
-const SAD: &[Frame] = &[
-    f(1100, SE, -1.5, 0., 1., [(2, 24), (26, 24)], FEET, None),
-    f(900, SE, -2., 0., 0.98, [(3, 24), (25, 24)], FEET, None),
-];
+const SAD: &[Frame] = &[f(1600, D, 0., None), f(1800, S, 0., None)];
 const CURIOUS: &[Frame] = &[
-    f(550, ST, -2., 0., 1., DOWN, FEET, None),
-    f(700, ST, 2.5, 0., 1., [(0, 19), (28, 13)], FEET, None),
-    f(300, ST, 0., 1., 1.02, [(0, 17), (28, 17)], FEET, None),
+    f(900, R, 0., None),
+    f(1600, P, 1., None),
+    f(1000, E, 0., None),
+    f(1300, R, 0., None),
 ];
 const BORED: &[Frame] = &[
-    f(900, SE, -2., 0., 1., DOWN, FEET, None),
-    f(500, SE, -1., 0., 1., [(0, 20), (23, 15)], FEET, None),
-    f(500, SE, 0., 0., 1., DOWN, [(7, 27), (21, 25)], None),
-    f(400, SE, 0., 0., 1., DOWN, FEET, Some(MotionEvent::Step)),
+    f(1400, D, 0., None),
+    f(900, S, 0., None),
+    f(700, P, 0., None),
+    f(1500, D, 0., None),
 ];
 const PLAY: &[Frame] = &[
-    f(350, ST, 2., 0., 1., DOWN, FEET, None),
-    f(320, SE, 3., 0., 1., [(10, 23), (20, 23)], FEET, None),
-    f(
-        600,
-        ST,
-        1.,
-        0.,
-        1.,
-        [(10, 21), (27, 22)],
-        FEET,
-        Some(MotionEvent::Catch),
-    ),
-    f(220, SE, -1., 0., 1., [(10, 22), (27, 22)], FEET, None),
-    f(
-        160,
-        SX,
-        0.,
-        0.,
-        1.,
-        [(10, 6), (20, 6)],
-        FEET,
-        Some(MotionEvent::Release),
-    ),
-    f(650, ST, 0., 0., 1., [(8, 10), (22, 10)], FEET, None),
-    f(
-        240,
-        SE,
-        1.,
-        0.,
-        1.,
-        [(10, 21), (27, 22)],
-        FEET,
-        Some(MotionEvent::Catch),
-    ),
-    f(1000, ST, 0., 0., 1., DOWN, FEET, None),
+    f(900, P, 0., None),
+    f(600, E, 0., None),
+    f(900, H, 0., Some(MotionEvent::Catch)),
+    f(350, H, 1., None),
+    f(250, U, 2., Some(MotionEvent::Release)),
+    f(1100, P, 0., None),
+    f(650, H, 0., Some(MotionEvent::Catch)),
+    f(1400, R, 0., None),
 ];
 const CELEBRATE: &[Frame] = &[
-    JUMP[0],
-    JUMP[1],
-    JUMP[2],
-    f(260, ST, -3., 7., 1., UP, [(5, 24), (22, 24)], None),
-    f(180, ST, 3., 3., 1., UP, FEET, None),
-    JUMP[5],
-    f(450, ST, 0., 0., 1., [(0, 9), (28, 14)], FEET, None),
+    f(300, D, 0., None),
+    f(350, E, 1., None),
+    f(650, U, 3., None),
+    f(500, X, 2., None),
+    f(450, E, 1., None),
+    f(1200, R, 0., None),
 ];
 const STUMBLE: &[Frame] = &[
-    f(160, ST, 2., 0., 1., DOWN, [(9, 27), (23, 25)], None),
-    f(210, ST, 7., 1., 0.95, UP, [(12, 27), (25, 24)], None),
-    f(
-        280,
-        SE,
-        5.,
-        0.,
-        1.,
-        [(1, 23), (28, 22)],
-        FEET,
-        Some(MotionEvent::Land),
-    ),
-    f(250, ST, -3., 0., 1., UP, FEET, None),
-    f(300, ST, 0., 0., 1., DOWN, FEET, None),
+    f(300, E, 0., None),
+    f(400, D, 0., None),
+    f(600, R, 0., None),
 ];
 #[derive(Clone, Copy)]
 pub struct Clip {
@@ -440,7 +246,7 @@ pub fn clip(id: ClipId) -> Clip {
         interruptible: !matches!(id, Jump | Stumble | Wake | Celebrate),
         loop_from: match id {
             Sit => 2,
-            Sleep => 3,
+            Sleep => 2,
             _ => 0,
         },
     }
@@ -668,6 +474,39 @@ impl Face {
 mod tests {
     use super::*;
     #[test]
+    fn cues_select_authored_clips_but_conversation_keeps_priority() {
+        let mut p = Pet::new(
+            crate::config::PetConfig::default(),
+            crate::pet::Snapshot::new(7),
+        );
+        p.gesture = crate::cues::Gesture::Wave;
+        assert_eq!(ClipId::for_pet(&p), ClipId::Curious);
+        p.thinking = true;
+        assert_eq!(ClipId::for_pet(&p), ClipId::Think);
+        p.speaking = true;
+        assert_eq!(ClipId::for_pet(&p), ClipId::Talk);
+    }
+    #[test]
+    fn play_events_match_authored_holding_frames() {
+        let mut t = Timeline::default();
+        t.request(ClipId::Play, true);
+        let mut events = Vec::new();
+        for _ in 0..600 {
+            t.advance(Duration::from_millis(10));
+            let shape = t.frame().shape;
+            for event in t.drain_events() {
+                if event == MotionEvent::Catch {
+                    assert_eq!(shape, Shape::Hold);
+                }
+                events.push(event);
+            }
+        }
+        assert_eq!(
+            events,
+            vec![MotionEvent::Catch, MotionEvent::Release, MotionEvent::Catch]
+        );
+    }
+    #[test]
     fn gait_distance_is_independent_of_frame_partition() {
         let mut a = Timeline::default();
         let mut b = Timeline::default();
@@ -702,17 +541,18 @@ mod tests {
         a.step_frame();
         assert_eq!(a.index, 3);
         a.step_frame();
-        assert_eq!(a.index, 4);
+        assert_eq!(a.index, 2);
     }
     #[test]
     fn durations_loops_and_pingpong() {
         let mut t = Timeline::default();
         t.request(ClipId::Walk, true);
-        t.advance(Duration::from_millis(119));
+        t.advance(Duration::from_millis(699));
         assert_eq!(t.index, 0);
         t.advance(Duration::from_millis(1));
         assert_eq!(t.index, 1);
-        t.advance(Duration::from_millis(320));
+        t.advance(Duration::from_millis(600));
+        t.advance(Duration::from_millis(900));
         assert_eq!(t.index, 0);
         t.request(ClipId::Think, true);
         for _ in 0..3 {
@@ -749,11 +589,9 @@ mod tests {
             assert!(c.frames.len() >= 2);
             for f in c.frames {
                 assert!(f.ms > 0);
-                assert!((0.8..=1.2).contains(&f.squash));
-                for (x, y) in f.arms.iter().chain(f.feet.iter()) {
-                    assert!((0..=28).contains(x));
-                    assert!((0..=27).contains(y));
-                }
+                let m = crate::art::model(f.shape);
+                assert_eq!(m.origin, crate::art::ORIGIN);
+                assert!((0.0..=3.0).contains(&f.lift));
             }
         }
     }

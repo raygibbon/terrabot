@@ -235,6 +235,7 @@ pub struct Pet {
     next_blink: u64,
     blink_until: u64,
     target: f32,
+    drift_velocity: f32,
     success_context: bool,
 }
 impl Pet {
@@ -286,6 +287,7 @@ impl Pet {
             next_blink: tick.saturating_add(60),
             blink_until: 0,
             target: 0.5,
+            drift_velocity: 0.0,
             success_context: false,
         };
         pet.choose(routine, 0, 120);
@@ -322,13 +324,17 @@ impl Pet {
         let distance = self.target - self.x;
         self.moving = distance.abs() > 0.008;
         if self.moving {
-            self.facing = if distance < 0.0 { -1.0 } else { 1.0 };
             let speed = if self.activity == Activity::Chase || self.priority >= 60 {
                 0.004
             } else {
                 0.002
             };
-            self.x = (self.x + distance.clamp(-speed, speed)).clamp(0.0, 1.0);
+            let wanted = distance.clamp(-speed, speed);
+            self.drift_velocity += (wanted - self.drift_velocity).clamp(-0.0004, 0.0004);
+            if self.drift_velocity.abs() > 0.0003 {
+                self.facing = self.drift_velocity.signum();
+            }
+            self.x = (self.x + self.drift_velocity).clamp(0.46, 0.54);
             if self.travel_budget > 0 {
                 self.travel_budget -= 1;
                 self.next_choice = tick.saturating_add(self.duration);
@@ -338,6 +344,8 @@ impl Pet {
             }
             self.age = 0.0;
         } else {
+            self.drift_velocity *= 0.65;
+            self.x = (self.x + self.drift_velocity).clamp(0.46, 0.54);
             self.facing =
                 if self.activity == Activity::Watch || self.activity == Activity::Attention {
                     1.0
@@ -884,7 +892,7 @@ mod tests {
         p.config.daily_routine = false;
         assert!(!p.is_night());
         p.config.daily_routine = true;
-        p.x = p.traits.life.favourite_rest;
+        p.x = 0.5; // Rest now occurs at home, not at a legacy habitat coordinate.
         p.traits.energy = 0.3;
         p.traits.life.comfort = 0.1;
         p.interact(Action::Rest);

@@ -81,7 +81,7 @@ fn reviewed_terminal_cell_references() {
         ClipId::Celebrate,
         ClipId::Play,
     ] {
-        for ms in [0, 240, 520, 800, 1200, 1800] {
+        for ms in [0, 520, 1200, 2000, 3200, 4300] {
             let name = format!("{id:?}-{ms}.cells");
             let actual = capture(id, ms);
             if let Some(dir) = std::env::var_os("TERRABOT_REVIEW_REFERENCES") {
@@ -90,7 +90,7 @@ fn reviewed_terminal_cell_references() {
                 std::fs::write(dir.join(name), actual).unwrap();
             } else {
                 let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/visual/v044")
+                    .join("tests/visual/v050")
                     .join(&name);
                 let expected = std::fs::read_to_string(&path)
                     .unwrap_or_else(|_| panic!("missing reviewed reference {}", path.display()));

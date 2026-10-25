@@ -49,7 +49,14 @@ impl App for Demo {
                     if self.showcase && now >= self.next_showcase {
                         t.preview_clip(ClipId::ALL[self.clip_index % ClipId::ALL.len()]);
                         self.clip_index += 1;
-                        self.next_showcase = now + Duration::from_secs(4);
+                        self.next_showcase = now
+                            + Duration::from_secs(if t.timeline.id == ClipId::Curious {
+                                8
+                            } else if t.timeline.id == ClipId::Play {
+                                7
+                            } else {
+                                4
+                            });
                     }
                     t.advance(elapsed);
                     if self.fake_end.is_some_and(|end| now >= end) {
