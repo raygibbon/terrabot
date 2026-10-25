@@ -1,7 +1,9 @@
 use crate::{
+    animation::Terri,
     config::Config,
+    persistence,
+    pet::{PetEvent, Snapshot},
     provider::{Message, Role, Update, Worker},
-    terry::{State, Terry},
 };
 use std::{
     io,
@@ -196,14 +198,16 @@ pub struct Chat {
     config: Config,
     input: WindowId,
     transcript: WindowId,
-    terry: WindowId,
+    terri: WindowId,
     header: WindowId,
     worker: Option<Worker>,
     history: Vec<Message>,
     pending: Option<String>,
     response: String,
     ready: bool,
-    started: Instant,
+    last_tick: Instant,
+    cue_worker: Option<Worker>,
+    state_path: Option<std::path::PathBuf>,
     clock: FrameClock,
     panel: u16,
 }
@@ -213,9 +217,9 @@ impl Chat {
             .widget_mut::<Group>(self.group)?
             .widget_mut::<T>(id)
     }
-    fn set_state(&self, c: &mut Context<'_, ()>, state: State) {
-        if let Some(t) = self.widget::<Terry>(c, self.terry) {
-            t.set(state, Instant::now());
+    fn pet_event(&self, c: &mut Context<'_, ()>, event: PetEvent<'_>) {
+        if let Some(t) = self.widget::<Terri>(c, self.terri) {
+            t.event(event);
         }
     }
     fn transcript<'a>(&self, c: &'a mut Context<'_, ()>) -> Option<&'a mut Transcript> {
@@ -236,7 +240,7 @@ impl Chat {
     }
     fn layout(&self, c: &mut Context<'_, ()>) {
         let size = c.size();
-        let show = self.config.interface.show_terry && size.width >= 52 && size.height >= 14;
+        let show = self.config.interface.show_terri && size.width >= 52 && size.height >= 14;
         let panel = if size.width < 90 || size.height < 23 {
             20
         } else {
@@ -248,7 +252,7 @@ impl Chat {
                 (
                     Length::Fixed(panel),
                     if show {
-                        Layout::Window(self.terry)
+                        Layout::Window(self.terri)
                     } else {
                         Layout::Hidden
                     },
@@ -276,30 +280,38 @@ impl Chat {
     fn schedule(&mut self, c: &mut Context<'_, ()>) {
         let size = c.size();
         let animated = self.config.interface.animation
-            && self.config.interface.show_terry
+            && self.config.interface.show_terri
             && size.width >= 52
             && size.height >= 14;
-        let happy = self
-            .widget::<Terry>(c, self.terry)
-            .is_some_and(|t| t.state == State::Happy);
-        if animated {
-            if let Some(deadline) = self.clock.deadline() {
-                c.set_timer(TICK, deadline);
-            }
-        } else if self.worker.is_some() || happy {
-            c.set_timer(TICK, Deadline(Instant::now() + Duration::from_millis(50)));
+        let healthy = self
+            .widget::<Terri>(c, self.terri)
+            .is_some_and(|t| t.fault.is_none());
+        let interval = if animated && healthy {
+            let remaining = self
+                .widget::<Terri>(c, self.terri)
+                .map(|t| t.pet.remaining())
+                .unwrap_or(Duration::from_millis(50));
+            self.clock
+                .deadline()
+                .map(|d| d.remaining(Instant::now()))
+                .unwrap_or(remaining)
+                .min(remaining)
+        } else if self.worker.is_some() || self.cue_worker.is_some() {
+            Duration::from_millis(50)
         } else {
-            c.cancel_timer(TICK);
-        }
+            Duration::from_secs(1)
+        };
+        c.set_timer(TICK, Deadline(Instant::now() + interval));
     }
     fn check(&mut self, c: &mut Context<'_, ()>) {
         self.worker = None;
+        self.cue_worker = None;
         self.ready = false;
         match Worker::start(self.config.ollama.clone(), None) {
             Ok(w) => {
                 self.worker = Some(w);
                 self.status(c, "Checking connection");
-                self.set_state(c, State::Thinking);
+                self.pet_event(c, PetEvent::Thinking);
             }
             Err(e) => self.fail(c, format!("Cannot start model worker: {e}")),
         }
@@ -314,7 +326,7 @@ impl Chat {
             t.add("Connection / request error", error);
         }
         self.status(c, "Error · F5 retries");
-        self.set_state(c, State::Error);
+        self.pet_event(c, PetEvent::Error);
     }
     fn send(&mut self, c: &mut Context<'_, ()>) {
         if self.worker.is_some() {
@@ -329,7 +341,7 @@ impl Chat {
             .map(|i| i.editor.text.trim().to_owned())
             .unwrap_or_default();
         if text.is_empty() {
-            self.set_state(c, State::Confused);
+            self.pet_event(c, PetEvent::Error);
             c.redraw();
             return;
         }
@@ -346,7 +358,13 @@ impl Chat {
             }
             self.history.drain(..2);
         }
-        let mut messages = self.history.clone();
+        self.cue_worker = None;
+        self.pet_event(c, PetEvent::User(&text));
+        let mut messages = vec![Message {
+            role: Role::System,
+            content: crate::cues::profile(&self.config.agent.name),
+        }];
+        messages.extend(self.history.clone());
         messages.push(Message {
             role: Role::User,
             content: text.clone(),
@@ -361,7 +379,7 @@ impl Chat {
             Ok(w) => {
                 self.worker = Some(w);
                 self.status(c, "Thinking · Esc cancels");
-                self.set_state(c, State::Thinking);
+                self.pet_event(c, PetEvent::Thinking);
             }
             Err(e) => self.fail(c, e.to_string()),
         }
@@ -375,18 +393,32 @@ impl Chat {
                     self.worker = None;
                     self.ready = true;
                     self.status(c, "Connected");
-                    self.set_state(c, State::Idle);
+                    self.pet_event(c, PetEvent::Idle);
                 }
                 Some(Ok(Update::Text(s))) => {
                     self.response.push_str(&s);
                     if let Some(t) = self.transcript(c) {
                         t.append(&s);
                     }
-                    self.set_state(c, State::Responding);
+                    self.pet_event(c, PetEvent::Speaking);
                     self.status(c, "Responding · Esc cancels");
                 }
                 Some(Ok(Update::Done)) => {
                     self.worker = None;
+                    self.pet_event(c, PetEvent::Done(&self.response));
+                    if self.config.ollama.emotion_cues {
+                        let excerpt = format!(
+                            "User: {}\nAssistant: {}",
+                            self.pending
+                                .as_deref()
+                                .unwrap_or_default()
+                                .chars()
+                                .take(1000)
+                                .collect::<String>(),
+                            self.response.chars().take(2000).collect::<String>()
+                        );
+                        self.cue_worker = Worker::cue(self.config.ollama.clone(), excerpt).ok();
+                    }
                     if let Some(user) = self.pending.take() {
                         self.history.push(Message {
                             role: Role::User,
@@ -398,35 +430,43 @@ impl Chat {
                         });
                     }
                     self.status(c, "Connected");
-                    self.set_state(c, State::Happy);
                 }
                 Some(Ok(Update::Error(e))) => self.fail(c, e),
+                Some(Ok(Update::Cue(_))) => {}
                 Some(Err(tokio::sync::mpsc::error::TryRecvError::Disconnected)) => {
                     self.fail(c, "Model worker stopped unexpectedly".into())
                 }
                 _ => break,
             }
         }
-        let now = Instant::now();
-        let typing = self
-            .widget::<Input>(c, self.input)
-            .is_some_and(|i| !i.editor.text.is_empty());
-        if let Some(t) = self.widget::<Terry>(c, self.terry) {
-            let before = t.state;
-            t.settle(now, typing);
-            if before != t.state {
-                c.redraw();
+        match self.cue_worker.as_mut().map(|w| w.receiver.try_recv()) {
+            Some(Ok(update)) => {
+                if let Update::Cue(cue) = update {
+                    self.pet_event(c, PetEvent::Cue(cue));
+                    c.redraw();
+                }
+                self.cue_worker = None;
             }
+            Some(Err(tokio::sync::mpsc::error::TryRecvError::Disconnected)) => {
+                self.cue_worker = None
+            }
+            _ => {}
+        }
+        let now = Instant::now();
+        let elapsed = now.saturating_duration_since(self.last_tick);
+        self.last_tick = now;
+        if let Some(t) = self.widget::<Terri>(c, self.terri) {
+            t.advance(elapsed);
         }
         if self.clock.poll(now).is_some()
             && self.config.interface.animation
-            && self.config.interface.show_terry
+            && self.config.interface.show_terri
             && c.size().width >= 52
             && c.size().height >= 14
+            && self
+                .widget::<Terri>(c, self.terri)
+                .is_some_and(|t| t.fault.is_none())
         {
-            if let Some(t) = self.widget::<Terry>(c, self.terry) {
-                t.elapsed = now - self.started;
-            }
             c.redraw();
         }
         self.schedule(c);
@@ -435,6 +475,19 @@ impl Chat {
 impl App for Chat {
     type Message = ();
     fn init(&mut self, c: &mut Context<'_, ()>) -> io::Result<()> {
+        if self.config.interface.palette == "auto" {
+            let caps = c.capabilities();
+            let palette = if caps.unicode.support == terrabox::Support::Unsupported {
+                crate::animation::Palette::Ascii
+            } else if caps.truecolor.support == terrabox::Support::Unsupported {
+                crate::animation::Palette::Indexed
+            } else {
+                crate::animation::Palette::TrueColor
+            };
+            if let Some(t) = self.widget::<Terri>(c, self.terri) {
+                t.palette = palette;
+            }
+        }
         self.layout(c);
         self.check(c);
         Ok(())
@@ -444,19 +497,8 @@ impl App for Chat {
             AppEvent::Timer(TICK) => self.tick(c),
             AppEvent::Command(SEND) => self.send(c),
             AppEvent::Command(EDIT) => {
-                if self.worker.is_none() && self.ready {
-                    let typing = self
-                        .widget::<Input>(c, self.input)
-                        .is_some_and(|i| !i.editor.text.is_empty());
-                    self.set_state(
-                        c,
-                        if typing {
-                            State::Listening
-                        } else {
-                            State::Idle
-                        },
-                    );
-                }
+                self.cue_worker = None;
+                self.pet_event(c, PetEvent::Typing);
             }
             AppEvent::Terminal(Event::Resize(_)) => {
                 self.layout(c);
@@ -484,7 +526,7 @@ impl App for Chat {
                                     "Disconnected · F5 retries"
                                 },
                             );
-                            self.set_state(c, State::Confused);
+                            self.pet_event(c, PetEvent::Error);
                             self.schedule(c);
                         }
                         Key::PageUp => {
@@ -508,6 +550,31 @@ impl App for Chat {
                             self.layout(c);
                         }
                         Key::Function(5) if self.worker.is_none() => self.check(c),
+                        Key::Function(6) => {
+                            self.config.interface.animation = !self.config.interface.animation;
+                            if let Some(t) = self.widget::<Terri>(c, self.terri) {
+                                t.animate = self.config.interface.animation;
+                            }
+                            self.schedule(c);
+                            c.redraw();
+                        }
+                        Key::Function(7) => {
+                            let value = if self.config.interface.animation_intensity > 0.5 {
+                                0.35
+                            } else {
+                                1.0
+                            };
+                            self.config.interface.animation_intensity = value;
+                            if let Some(t) = self.widget::<Terri>(c, self.terri) {
+                                t.intensity = value;
+                            }
+                            c.redraw();
+                        }
+                        Key::Function(8) => {
+                            self.config.interface.show_terri = !self.config.interface.show_terri;
+                            self.layout(c);
+                            self.schedule(c);
+                        }
                         _ => {}
                     }
                 }
@@ -516,8 +583,14 @@ impl App for Chat {
         }
         Ok(())
     }
-    fn shutdown(&mut self, _: &mut Context<'_, ()>) -> io::Result<()> {
+    fn shutdown(&mut self, c: &mut Context<'_, ()>) -> io::Result<()> {
         self.worker = None;
+        self.cue_worker = None;
+        if let Some(path) = &self.state_path
+            && let Some(t) = self.widget::<Terri>(c, self.terri)
+        {
+            persistence::save(path, &t.pet.snapshot()).map_err(io::Error::other)?;
+        }
         Ok(())
     }
 }
@@ -550,9 +623,41 @@ pub fn run(config: Config) -> io::Result<()> {
     };
     let mut controls = Group::default();
     let header = controls.add(Label(String::new()), false);
-    let terry = controls.add(Terry::new(now), false);
+    let mut state_path = if config.pet.persist {
+        persistence::default_path()
+    } else {
+        None
+    };
+    let mut warning = None;
+    let mut snapshot = match state_path
+        .as_deref()
+        .map(|p| persistence::load(p, config.pet.seed))
+    {
+        Some(Ok(s)) => s,
+        Some(Err(e)) => {
+            warning = Some(format!(
+                "Terri state could not be loaded: {e}. Existing file preserved; this session will not save."
+            ));
+            state_path = None;
+            Snapshot::new(config.pet.seed)
+        }
+        None => Snapshot::new(config.pet.seed),
+    };
+    snapshot.sessions = snapshot.sessions.saturating_add(1);
+    let mut character = Terri::new(config.pet.clone(), snapshot);
+    character.animate = config.interface.animation;
+    character.intensity = config.interface.animation_intensity;
+    character.palette = match config.interface.palette.as_str() {
+        "indexed" => crate::animation::Palette::Indexed,
+        "ascii" => crate::animation::Palette::Ascii,
+        _ => crate::animation::Palette::TrueColor,
+    };
+    let terri = controls.add(character, false);
     let mut transcript_widget = Transcript::new();
     transcript_widget.add("Welcome",format!("I'm {}. Let's make something useful.\nChat stays in memory and is sent only to your configured Ollama endpoint.\nType below; Enter sends, Escape cancels, Page Up/Down scrolls.",config.agent.name));
+    if let Some(warning) = warning {
+        transcript_widget.add("State notice", warning);
+    }
     let transcript = controls.add(transcript_widget, false);
     let input = controls.add(
         Input {
@@ -573,16 +678,18 @@ pub fn run(config: Config) -> io::Result<()> {
             config,
             input,
             transcript,
-            terry,
+            terri,
             header,
             worker: None,
             history: vec![],
             pending: None,
             response: String::new(),
             ready: false,
-            started: now,
+            last_tick: now,
+            cue_worker: None,
+            state_path,
             clock,
-            panel: 38,
+            panel: 42,
         },
         desktop,
     )
@@ -591,6 +698,44 @@ pub fn run(config: Config) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn input_focus_returns_after_tiny_resize() {
+        let mut desktop = Desktop::default();
+        let mut group = Group::default();
+        let label = group.add(Label("Terri".into()), false);
+        let input = group.add(
+            Input {
+                editor: TextInput::new(""),
+            },
+            true,
+        );
+        group.layout = Layout::Split {
+            axis: Axis::Vertical,
+            children: vec![
+                (Length::Flex(1), Layout::Window(label)),
+                (Length::Fixed(1), Layout::Window(input)),
+            ],
+        };
+        let root = desktop.add_window(group);
+        desktop.layout = Layout::Window(root);
+        for (width, height) in [(80, 24), (0, 0), (1, 1), (80, 24)] {
+            desktop.render(terrabox::Size { width, height });
+        }
+        desktop.route(&Event::Key(terrabox::KeyEvent::new(
+            Key::Char('x'),
+            Modifiers::NONE,
+        )));
+        assert_eq!(
+            desktop
+                .widget_mut::<Group>(root)
+                .unwrap()
+                .widget_mut::<Input>(input)
+                .unwrap()
+                .editor
+                .text,
+            "x"
+        );
+    }
     #[test]
     fn input_limit_never_swallows_quit() {
         let mut input = Input {
@@ -618,28 +763,5 @@ mod tests {
             t.add("You", "hello".into());
         }
         assert_eq!(t.messages.len(), 128);
-    }
-    #[test]
-    fn tiny_layouts_and_all_expressions_render() {
-        let now = Instant::now();
-        let mut desktop = Desktop::default();
-        let id = desktop.add_window(Terry::new(now));
-        desktop.layout = Layout::Window(id);
-        for state in [
-            State::Idle,
-            State::Listening,
-            State::Thinking,
-            State::Responding,
-            State::Happy,
-            State::Confused,
-            State::Error,
-            State::SecurityBlocked,
-        ] {
-            desktop.widget_mut::<Terry>(id).unwrap().set(state, now);
-            for (width, height) in [(0, 0), (1, 1), (18, 12), (38, 22)] {
-                let surface = desktop.render(terrabox::Size { width, height });
-                assert_eq!(surface.size().width, width);
-            }
-        }
     }
 }

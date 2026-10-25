@@ -31,6 +31,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.server.requests.append(request)
+        if "format" in request:
+            cue = {"emotion": "curious", "gesture": "head_tilt", "intensity": 0.6}
+            if "badcue" in request["messages"][-1]["content"]:
+                cue["gesture"] = "execute_shell"
+            data = json.dumps({"message": {"content": json.dumps(cue)}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson")
         self.send_header("Connection", "close")
@@ -54,20 +64,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             pass
 
 class Terminal:
-    def __init__(self, endpoint, model="test", animation=True):
+    def __init__(self, endpoint, model="test", animation=True, cues=False, command=None):
         self.directory = tempfile.TemporaryDirectory()
         config = Path(self.directory.name) / "config.toml"
         config.write_text(f'[ollama]\nendpoint="{endpoint}"\nmodel="{model}"\n'
-                          f'[interface]\nanimation={str(animation).lower()}\n')
+                          f'emotion_cues={str(cues).lower()}\n[interface]\nanimation={str(animation).lower()}\n')
         self.master, self.slave = os.openpty()
         self.resize(110, 30, notify=False)
         self.original = termios.tcgetattr(self.slave)
         def attach():
             os.setsid()
             fcntl.ioctl(self.slave, termios.TIOCSCTTY, 0)
-        self.process = subprocess.Popen([str(BINARY), "--config", str(config)],
+        self.process = subprocess.Popen(command or [str(BINARY), "--config", str(config)],
             stdin=self.slave, stdout=self.slave, stderr=self.slave,
-            preexec_fn=attach, env={**os.environ, "TERM": "xterm-256color"})
+            preexec_fn=attach, env={**os.environ, "TERM": "xterm-256color", "XDG_STATE_HOME": self.directory.name})
         self.output = bytearray()
     def resize(self, width, height, notify=True):
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, 0, 0))
@@ -106,6 +116,8 @@ class Terminal:
             self.process.wait()
             os.close(self.master)
             os.close(self.slave)
+            state = Path(self.directory.name) / "terrabot/terri.json"
+            self.saved_state = json.loads(state.read_text()) if state.exists() else None
             self.directory.cleanup()
 
 class Smoke(unittest.TestCase):
@@ -143,9 +155,9 @@ class Smoke(unittest.TestCase):
                 t.pump()
             self.assertEqual(len(self.server.requests), 2)
             messages = self.server.requests[1]["messages"]
-            self.assertEqual([m["role"] for m in messages], ["user", "assistant", "user"])
+            self.assertEqual([m["role"] for m in messages], ["system", "user", "assistant", "user"])
             self.assertEqual(messages[-1]["content"], "second")
-            self.assertEqual(messages[1]["content"], "Hello 世界 — streamed reply.")
+            self.assertEqual(messages[2]["content"], "Hello 世界 — streamed reply.")
             self.assertEqual(self.server.requests[1]["options"]["num_ctx"], 8192)
             t.send(b"\x1b[5~\x1b[6~")
         finally:
@@ -167,6 +179,47 @@ class Smoke(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(b"all security enable flags must remain false", result.stderr)
             self.assertNotIn(b"\x1b[?1049h", result.stdout)
+    def test_separate_cues_and_persistent_metadata(self):
+        self.server.requests.clear()
+        t = Terminal(self.endpoint, cues=True)
+        try:
+            t.wait_for("Connected")
+            t.send("hello Terri\r")
+            t.wait_for("streamed reply.")
+            t.wait_for("Curious")
+            self.assertEqual(len(self.server.requests), 2)
+            self.assertTrue(self.server.requests[0]["stream"])
+            self.assertFalse(self.server.requests[1]["stream"])
+            self.assertIn("format", self.server.requests[1])
+            self.assertIn("AI assistant", self.server.requests[0]["messages"][0]["content"])
+            t.send("badcue\r")
+            t.pump(1)
+            self.assertIsNone(t.process.poll())
+        finally:
+            t.close()
+        self.assertEqual(t.saved_state["version"], 1)
+        self.assertGreaterEqual(t.saved_state["conversations"], 1)
+        self.assertNotIn("hello Terri", json.dumps(t.saved_state))
+
+    def test_demo_controls_resize_and_restoration(self):
+        t = Terminal(self.endpoint, command=[str(ROOT / "target/release/examples/terri-demo")])
+        try:
+            t.wait_for("TERRI")
+            t.send("s")
+            t.wait_for("Resting")
+            t.send("w")
+            t.wait_for("stretch")
+            t.send("f")
+            t.wait_for("Speaking")
+            t.send("d")
+            t.wait_for("Policy denied")
+            t.send("rmnbep-+a")
+            for w, h in [(18, 10), (1, 1), (110, 30)]:
+                t.resize(w, h)
+                t.pump(0.1)
+        finally:
+            t.close(b"q")
+
     def test_unavailable_model(self):
         t = Terminal(self.endpoint, "absent")
         try:

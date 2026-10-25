@@ -1,113 +1,165 @@
-# Terrabot
+# Terrabot v0.2 — Terri
 
-A local-first Ollama chatbot with Terry, a shaded, animated terminal-cell robot.
-Built directly on TerraBox and TerraTUI. No image assets or graphics protocols.
+Terri is a curious, technically capable AI companion who lives in your terminal.
+Her handcrafted lilac coat, mint orb, expressive eyes and tiny feet are drawn
+entirely with terminal cells. She explores, investigates, plays, rests and reacts
+to conversation while your local Ollama model supplies her replies.
 
-## Run
+Her idle activities are cosmetic. She never demands care, suffers for being left
+alone, or triggers tools, shell commands, file access or model requests herself.
 
-Use modern stable Rust (edition 2024) and keep the repositories beside each other:
+## Start chatting
+
+Use stable Rust and these sibling repositories:
 
 ```text
 work/
   terrabox/crates/{terrabox,terratui}
+  terragame/crates/terragame-core
   terrabot/
 ```
 
 ```bash
-# In another terminal, if Ollama isn't already running:
+# Start Ollama separately if it isn't running, and install your chosen model:
 ollama serve
-# Install the default model explicitly (Terrabot never downloads models):
 ollama pull qwen3:8b
 
-# In terrabot:
+# From terrabot:
 cargo run --release
 ```
 
-Use a UTF-8 terminal with true-colour support and a monospace font containing
-Unicode block characters. An attached controlling terminal is required. The
-executable is `target/release/terrabot`. No external terminal backend is used.
+Use a UTF-8 terminal with a monospace font and true colour for the best result.
+The executable is `target/release/terrabot`. Terrabot checks the server and model
+asynchronously, reports failures inside chat, and reconnects with F5. It does not
+download models. You can edit the next draft while a reply streams; Enter during
+generation leaves that draft intact.
 
-Terrabot checks the configured server and model asynchronously. Failures appear
-in the conversation; fix the issue and press F5. Your input remains editable
-while a request runs. Enter during generation leaves the draft in place.
+## Try Terri without Ollama
 
-## Controls
+```bash
+cargo run --release --example terri-demo
+cargo run --release --example terri-demo -- --auto
+```
+
+| Demo key | Action |
+| --- | --- |
+| M | Cycle the eleven moods |
+| N | Trigger the next of ten activities |
+| B / E | Increase boredom / reduce energy |
+| S / W | Sleep / wake and attend |
+| F | Simulate speaking for three seconds |
+| D | Simulate a security denial; executes nothing |
+| R | Reset the simulation |
+| A | Toggle automatic activity cycle |
+| P | Toggle animation |
+| − / + | Reduce / increase motion intensity |
+| Q / Escape / Ctrl+C | Quit |
+
+The demo does not load or save your personality file. Optional arguments:
+`--fps 20`, `--seconds 10`, `--indexed`, `--ascii`. Timed runs print observed
+render pacing after restoring the terminal. The automatic cycle changes activity
+every four seconds; leave it running for forty seconds to see all ten.
+
+## Chat controls
 
 | Key | Action |
 | --- | --- |
-| Enter | Send a message (or reconnect when disconnected) |
-| Left / Right, Home / End | Move through the input by grapheme |
-| Backspace / Delete | Edit input |
-| Page Up / Page Down | Scroll conversation / return toward live output |
-| F2 / F3 | Shrink / grow Terry's panel on larger terminals |
-| Escape | Cancel connection check or generation |
-| F5 | Recheck server and installed model when idle |
+| Enter | Send; reconnect if disconnected |
+| Left / Right, Home / End | Move through the draft by grapheme |
+| Backspace / Delete | Edit; bracketed paste is supported |
+| Page Up / Page Down | Scroll conversation |
+| Escape | Cancel the active request |
+| F2 / F3 | Resize Terri's panel on larger terminals |
+| F5 | Recheck server and model |
+| F6 | Toggle animation |
+| F7 | Toggle normal / reduced motion |
+| F8 | Hide / show Terri |
 | Ctrl+Q / Ctrl+C | Quit and restore terminal |
 
-Large terminals show a 36-column character, compact layouts show an 18-column
-version, and terminals below 52 columns or 14 rows hide Terry. Layouts resize
-immediately. Input remains at the bottom. Transcript text is plain text, not
-Markdown; model-supplied control characters are filtered for display.
+Small panels use a half-size character. Terminals below 52 columns or 14 rows
+hide her to preserve chat space. Her clipped viewport cannot overwrite input or
+conversation. A character-rendering error pauses her display while chat continues.
 
-## Configuration
-
-Defaults work without a file. To customize:
+## Configuration and saved personality
 
 ```bash
 mkdir -p ~/.config/terrabot
 cp config.example.toml ~/.config/terrabot/config.toml
 ```
 
-Set `ollama.model` to an installed model, or change the endpoint.
-`terrabot --config PATH` uses an alternate file. Both dark and light themes are
-supported. `animation = false` keeps a static character whose expression still
-reflects the current state. `show_terry = false` gives the space to conversation.
-Unknown keys, invalid values and enabled security flags are rejected before
-entering terminal mode. See [config.example.toml](config.example.toml).
+Defaults work without a file. Use `--config PATH` for another file. See the
+[complete example](config.example.toml) for model, context/output limits, frame
+rate, intensity, palette, persistence and behaviour weights. Unknown keys and
+invalid values are rejected before entering terminal mode. Execution enable flags
+must remain false. Existing `show_terry` settings remain valid; change an explicit
+old `agent.name = "Terry"` to `"Terri"` to adopt her new name.
 
-Conversation is held only in memory. Requests go to the configured endpoint;
-using a remote endpoint sends your conversation there. No tools, shell commands,
-MCP servers, credentials or autonomous actions are implemented. A model's text
-never triggers execution.
+Traits, energy, mood, preferred activities, RNG state and interaction counters
+are saved on clean shutdown to `~/.local/state/terrabot/terri.json`, or beneath
+`$XDG_STATE_HOME` when set to an absolute path. Writes use a versioned JSON format,
+a private temporary file and atomic replacement. Invalid or future-version files
+are preserved; that session runs without saving. No conversation text is stored
+there. Closed time is not simulated. `pet.persist = false` disables state I/O.
 
-Input is capped at 8 KiB, each response at 128 KiB, and the transcript at 128
-entries / 512 KiB (plus at most one in-flight response). Provider history retains
-up to 32 completed turns, trimming oldest complete pairs before the next request
-at a 256 KiB budget. Ollama applies `num_ctx` and `num_predict`; the byte budget
-is not a token estimator. Failed/cancelled turns remain visible but are excluded
-from subsequent model history. Retrying after failure requires F5 and resending.
-Requests have a configurable total timeout; a slow cold model may need more time.
+Chat history remains in memory and goes only to your configured Ollama endpoint.
+A remote endpoint receives your conversation. Input is capped at 8 KiB and a
+response at 128 KiB. The transcript retains up to 128 entries / 512 KiB plus an
+in-flight response. Model history trims complete oldest turns before requests at
+32 turns / a 256 KiB byte budget. Failed or cancelled turns are visible but excluded
+from future model context. These byte limits do not estimate tokens; Ollama also
+receives `num_ctx` and `num_predict`.
 
-## Development
+## Personality and optional AI cues
+
+A concise system profile makes Terri helpful, curious and thoughtful, without
+pretending she has human consciousness or narrating every movement. Local events
+control attention, thinking and speaking. Conservative text heuristics recognize
+success and distress; serious conversations suppress playful cues and celebration.
+They are cosmetic heuristics, not an assessment of a person's emotional state.
+
+`ollama.emotion_cues = true` enables a separate structured inference request after
+a reply completes. It never delays that reply's first token. Only known mood and
+gesture enums and finite intensity values from 0 to 1 are accepted. Local priority
+and tone rules can reject even valid suggestions. Typing or sending a new prompt
+cancels a pending cue. Unsupported models, malformed cues and timeouts fall back
+to local behaviour. Cue JSON is never mixed into the conversation. See
+[Ollama's structured-output API](https://docs.ollama.com/capabilities/structured-outputs).
+
+## Development and measurements
 
 ```bash
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 cargo build --release
+cargo build --release --examples
 python3 tests/pty_smoke.py
+cargo run --release --example terri-benchmark
+python3 tests/benchmark_terminal.py
 ```
 
-The PTY smoke suite runs the real executable against a local mock Ollama server,
-checking stream fragments, multi-turn role ordering, missing server/model,
-cancellation, resizing, keyboard editing, clean exits and terminal restoration.
-It does not replace testing against an installed model or visual review in your
-own terminal. See [architecture](docs/architecture.md) and
-[validation](docs/validation.md) for implementation details and actual results.
+The PTY tests run the real app and demo, using a local mock Ollama server for
+streaming and cues. They isolate saved state in temporary directories. Read the
+[architecture](docs/architecture.md), [validation](docs/validation.md), and
+[performance measurements](docs/performance.md). Twenty FPS is the default;
+higher settings are measured options, not guarantees for every terminal emulator.
 
-## Capture a real terminal recording
+## Record authentic terminal animation
 
-Install [asciinema](https://docs.asciinema.org/manual/cli/quick-start/) and
-optionally [agg](https://docs.asciinema.org/manual/agg/usage/), then record the
-actual release executable:
+Install [asciinema](https://docs.asciinema.org/manual/cli/quick-start/) and optionally
+[agg](https://docs.asciinema.org/manual/agg/usage/), then record the actual program:
 
 ```bash
+cargo build --release --examples
+asciinema rec -c './target/release/examples/terri-demo --auto' terri.cast
+# Quit with Q when finished.
+agg terri.cast terri.gif
+
+# Or record a real conversation:
 asciinema rec -c './target/release/terrabot' terrabot.cast
-# Chat with Terry, resize the terminal if desired, then Ctrl+Q.
-agg terrabot.cast terrabot.gif
 ```
 
-Review the recording for private prompts before publishing. Add the resulting
-GIF to the repository and link it in this README. Use a roughly 110×30 terminal
-for the detailed character. Recording tools are optional development utilities;
-Terrabot itself never renders generated artwork or external images.
+Review recordings for private text before sharing. A 110×30 terminal shows the
+full character. Add your actual recording/GIF to the README if desired. No generated
+image is presented as a screenshot, and the application uses no image assets,
+graphics protocols, graphical window or second terminal backend.

@@ -859,13 +859,14 @@ dependencies = [
 
 [[package]]
 name = "terrabot"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "reqwest",
  "serde",
  "serde_json",
  "terrabox",
+ "terragame-core",
  "terratui",
  "tokio",
  "toml",
@@ -881,6 +882,10 @@ dependencies = [
  "unicode-width",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "terragame-core"
+version = "0.1.0"
 
 [[package]]
 name = "terratui"

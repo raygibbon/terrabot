@@ -8,6 +8,7 @@ pub struct Config {
     pub ollama: Ollama,
     pub interface: Interface,
     pub security: Security,
+    pub pet: PetConfig,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -17,7 +18,7 @@ pub struct Agent {
 impl Default for Agent {
     fn default() -> Self {
         Self {
-            name: "Terry".into(),
+            name: "Terri".into(),
         }
     }
 }
@@ -29,6 +30,7 @@ pub struct Ollama {
     pub num_ctx: u32,
     pub num_predict: u32,
     pub timeout_seconds: u64,
+    pub emotion_cues: bool,
 }
 impl Default for Ollama {
     fn default() -> Self {
@@ -38,6 +40,7 @@ impl Default for Ollama {
             num_ctx: 8192,
             num_predict: 2048,
             timeout_seconds: 300,
+            emotion_cues: false,
         }
     }
 }
@@ -45,7 +48,10 @@ impl Default for Ollama {
 #[serde(default, deny_unknown_fields)]
 pub struct Interface {
     pub theme: String,
-    pub show_terry: bool,
+    #[serde(alias = "show_terry")]
+    pub show_terri: bool,
+    pub animation_intensity: f32,
+    pub palette: String,
     pub animation: bool,
     pub animation_fps: u32,
 }
@@ -53,9 +59,28 @@ impl Default for Interface {
     fn default() -> Self {
         Self {
             theme: "dark".into(),
-            show_terry: true,
+            show_terri: true,
+            animation_intensity: 1.0,
+            palette: "auto".into(),
             animation: true,
-            animation_fps: 15,
+            animation_fps: 20,
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PetConfig {
+    pub persist: bool,
+    pub seed: u64,
+    /// Wander, sit, play, investigate, sleep, wake, dance, stumble, watch, celebrate.
+    pub behaviour_weights: [u16; 10],
+}
+impl Default for PetConfig {
+    fn default() -> Self {
+        Self {
+            persist: true,
+            seed: 0x5445525249,
+            behaviour_weights: [24, 14, 22, 16, 3, 0, 8, 1, 12, 0],
         }
     }
 }
@@ -107,9 +132,27 @@ impl Config {
                     .into(),
             );
         }
+        if !c.interface.animation_intensity.is_finite()
+            || !(0.0..=1.0).contains(&c.interface.animation_intensity)
+            || !matches!(
+                c.interface.palette.as_str(),
+                "auto" | "truecolor" | "indexed" | "ascii"
+            )
+        {
+            return Err(
+                "animation_intensity must be 0–1; palette auto, truecolor, indexed or ascii".into(),
+            );
+        }
+        if c.pet.behaviour_weights.iter().any(|w| *w > 1000)
+            || c.pet.behaviour_weights.iter().all(|w| *w == 0)
+        {
+            return Err(
+                "behaviour_weights require ten weights in 0–1000, at least one nonzero".into(),
+            );
+        }
         if c.security.tools_enabled || c.security.mcp_enabled || c.security.shell_enabled {
             return Err(
-                "v0.1 supports chat only; all security enable flags must remain false".into(),
+                "v0.2 supports chat only; all security enable flags must remain false".into(),
             );
         }
         Ok(c)
@@ -141,7 +184,7 @@ mod tests {
                 .unwrap()
                 .interface
                 .animation_fps,
-            15
+            20
         );
     }
     #[test]
@@ -154,6 +197,9 @@ mod tests {
             "[ollama]\nnum_predict=0",
             "[interface]\ntheme='other'",
             "typo=true",
+            "[interface]\nanimation_intensity=2.0",
+            "[interface]\npalette='invalid'",
+            "[pet]\nbehaviour_weights=[0,0,0,0,0,0,0,0,0,0]",
         ] {
             assert!(Config::parse(s).is_err(), "{s}");
         }

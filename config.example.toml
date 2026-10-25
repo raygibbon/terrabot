@@ -1,19 +1,29 @@
 [agent]
-name = "Terry"
+name = "Terri"
 
 [ollama]
 endpoint = "http://127.0.0.1:11434"
 model = "qwen3:8b"
 num_ctx = 8192
 num_predict = 2048
-# Total request deadline, including model loading and generation.
 timeout_seconds = 300
+# Optional second, bounded request AFTER a completed reply. Invalid cues are ignored.
+emotion_cues = false
 
 [interface]
 theme = "dark" # dark or light
-show_terry = true
+show_terri = true # legacy show_terry is accepted as an alias
 animation = true
-animation_fps = 15
+animation_fps = 20 # 1–60; see measured results in docs/performance.md
+animation_intensity = 1.0 # 0–1; lower values reduce movement
+palette = "auto" # auto, truecolor, indexed, ascii
+
+[pet]
+persist = true
+seed = 361940275785
+# Wander, Sit, Play, Investigate, Sleep, Wake, Dance, Stumble, Watch, Celebrate.
+# Each weight 0–1000. At least one must be nonzero. Low energy can still select rest.
+behaviour_weights = [24, 14, 22, 16, 3, 0, 8, 1, 12, 0]
 
 [security]
 tools_enabled = false
