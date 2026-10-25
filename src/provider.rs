@@ -22,7 +22,7 @@ pub struct Message {
 #[derive(Debug)]
 pub enum Update {
     Cue(crate::cues::EmotionCue),
-    Ready,
+    Discovered(Vec<crate::models::Model>),
     Text(String),
     Done,
     Error(String),
@@ -114,7 +114,13 @@ async fn request(
             .send()
             .await
             .map_err(|e| {
-                format!("Ollama unavailable at {endpoint}: {e}. Start ollama serve; F5 retries.")
+                if e.is_timeout() {
+                    format!("Connection timeout at {endpoint}; F5 retries.")
+                } else {
+                    format!(
+                        "Ollama unavailable at {endpoint}: {e}. Start ollama serve; F5 retries."
+                    )
+                }
             })?
             .error_for_status()
             .map_err(|e| format!("Ollama check failed: {e}"))?;
@@ -125,27 +131,7 @@ async fn request(
             }
             body.extend_from_slice(&chunk);
         }
-        let tags: serde_json::Value =
-            serde_json::from_slice(&body).map_err(|e| format!("Invalid model list: {e}"))?;
-        let models = tags["models"]
-            .as_array()
-            .ok_or("Ollama response has no model list")?;
-        let wanted = if c.model.contains(':') {
-            c.model.clone()
-        } else {
-            format!("{}:latest", c.model)
-        };
-        if !models.iter().any(|m| {
-            m["name"]
-                .as_str()
-                .is_some_and(|n| n == c.model || n == wanted)
-        }) {
-            return Err(format!(
-                "Model '{}' unavailable. Install it with: ollama pull {}. Then F5 to retry.",
-                c.model, c.model
-            ));
-        }
-        return emit(tx, Update::Ready).await;
+        return emit(tx, Update::Discovered(crate::models::parse(&body)?)).await;
     };
     let response = client
         .post(format!("{endpoint}/api/chat"))
@@ -155,10 +141,16 @@ async fn request(
         )
         .send()
         .await
-        .map_err(|e| format!("Ollama request failed: {e}"))?;
+        .map_err(|e| {
+            if e.is_timeout() {
+                format!("Connection timeout while loading model: {e}")
+            } else {
+                format!("Model generation failed: {e}")
+            }
+        })?;
     if !response.status().is_success() {
         return Err(format!(
-            "Ollama HTTP {}. Check model '{}' and retry with F5.",
+            "Model generation failed: Ollama HTTP {}. Check model '{}' and retry with F5.",
             response.status(),
             c.model
         ));
@@ -167,7 +159,13 @@ async fn request(
     let mut parser = Decoder::default();
     let mut total = 0;
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Stream interrupted: {e}"))?;
+        let chunk = chunk.map_err(|e| {
+            if e.is_timeout() {
+                format!("Connection timeout during generation: {e}")
+            } else {
+                format!("Stream interrupted: {e}")
+            }
+        })?;
         // Feed bytewise so a huge HTTP chunk cannot grow the framing buffer.
         for byte in chunk {
             if let Some(frame) = parser.push(byte)? {

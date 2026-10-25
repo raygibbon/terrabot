@@ -20,9 +20,8 @@ work/
 ```
 
 ```bash
-# Start Ollama separately if it isn't running, and install your chosen model:
+# Start Ollama separately if it is not running (use an installed chat model):
 ollama serve
-ollama pull qwen3:8b
 
 # From terrabot:
 cargo run --release
@@ -30,7 +29,7 @@ cargo run --release
 
 Use a UTF-8 terminal with a monospace font and true colour for the best result.
 The executable is `target/release/terrabot`. Terrabot checks the server and model
-asynchronously, reports failures inside chat, and reconnects with F5. It does not
+asynchronously, reports failures in a replaceable status area, and refreshes discovery with F5. It does not
 download models. You can edit the next draft while a reply streams; Enter during
 generation leaves that draft intact.
 
@@ -71,9 +70,10 @@ every four seconds; leave it running for forty seconds to see all ten.
 | Escape | Cancel the active request |
 | F2 / F3 | Resize Terri's panel on larger terminals |
 | F5 | Recheck server and model |
-| F6 | Toggle animation |
+| F6 | Open model picker; arrows navigate, Enter selects, Escape closes |
 | F7 | Toggle normal / reduced motion |
 | F8 | Hide / show Terri |
+| F9 | Toggle animation |
 | Ctrl+Q / Ctrl+C | Quit and restore terminal |
 
 Small panels use a half-size character. Terminals below 52 columns or 14 rows
@@ -163,3 +163,31 @@ Review recordings for private text before sharing. A 110×30 terminal shows the
 full character. Add your actual recording/GIF to the README if desired. No generated
 image is presented as a screenshot, and the application uses no image assets,
 graphics protocols, graphical window or second terminal backend.
+
+## Ollama model discovery and selection
+
+`[ollama] model = "auto"` is the default. Startup and F5 query `/api/tags`.
+Selection prefers an installed explicit configuration, then the saved selection
+for this endpoint, then a suitable chat model. Automatic selection checks completion
+capabilities when supplied; older servers use a name heuristic to exclude embedding
+and reranking models. General conversation names precede code/agent names, with
+lexical name ordering as the deterministic tie-breaker. Size does not influence ranking.
+Capability discovery is imperfect on older Ollama servers; F6 allows manual selection.
+
+A missing explicit model (including old `qwen3:8b` configurations) produces a visible
+notice naming the fallback. F6 displays installed alternatives and their sizes.
+No model is downloaded and your configuration is preserved. If no chat candidate
+exists, Terrabot explains the problem instead of sending a request.
+
+F6 selections take effect immediately, cancel any unfinished request, and keep
+completed conversation history. The endpoint-scoped choice is saved atomically in
+`$XDG_STATE_HOME/terrabot/models.json` (default `~/.local/state/terrabot/models.json`),
+separate from personality and configuration. An installed explicit configuration
+still takes priority on startup/F5; use `model = "auto"` to prefer the saved choice.
+Errors saving a selection are shown in the status area.
+
+Connection failures/timeouts get at most two automatic discovery retries, after
+2 and 4 seconds. Generation is never automatically replayed. F5 starts a fresh
+check and cancels an active request. Partial or cancelled responses remain visible
+but are excluded from model history. Loading/thinking, generation, timeout and
+interrupted-stream states are reported separately. Esc cancels an active request.

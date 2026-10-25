@@ -1,7 +1,7 @@
 use crate::{
     animation::Terri,
     config::Config,
-    persistence,
+    models, persistence,
     pet::{PetEvent, Snapshot},
     provider::{Message, Role, Update, Worker},
 };
@@ -13,7 +13,7 @@ use terrabox::{Canvas, Color, Deadline, Event, FrameClock, Key, Modifiers, Rect,
 use terratui::{
     App, AppEvent, Application, Axis, CommandId, Context, Desktop, EventResult, Layout, Length,
     Theme, TimerId, Widget, WindowId,
-    widgets::{Group, Label, TextInput},
+    widgets::{Group, Label, Panel, TextInput},
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -22,6 +22,27 @@ const EDIT: CommandId = CommandId(2);
 const INPUT_LIMIT: usize = 8192;
 const HISTORY_LIMIT: usize = 512 * 1024;
 const TICK: TimerId = TimerId(1);
+const QUIT: CommandId = CommandId(4);
+const SELECT_MODEL: CommandId = CommandId(3);
+struct ModelPicker {
+    names: Vec<String>,
+    list: Panel,
+}
+impl Widget for ModelPicker {
+    fn draw(&mut self, c: &mut Canvas<'_>, focused: bool, theme: &Theme) {
+        self.list.draw(c, focused, theme);
+    }
+    fn event(&mut self, event: &Event) -> EventResult {
+        if matches!(event, Event::Key(k) if k.modifiers.contains(Modifiers::CTRL) && matches!(k.key, Key::Char('q' | 'Q' | 'c' | 'C')))
+        {
+            EventResult::command(QUIT)
+        } else if matches!(event, Event::Key(k) if k.key == Key::Enter) {
+            EventResult::command(SELECT_MODEL)
+        } else {
+            self.list.event(event)
+        }
+    }
+}
 struct Input {
     editor: TextInput,
 }
@@ -93,6 +114,14 @@ impl Transcript {
         }
         self.dirty = true;
         self.scroll = 0;
+    }
+    fn replace_notice(&mut self, text: String) -> bool {
+        if self.messages.first().is_some_and(|(_, old)| old == &text) {
+            return false;
+        }
+        self.messages.clear();
+        self.add("Ollama status", text);
+        true
     }
     fn append(&mut self, text: &str) {
         if let Some((_, last)) = self.messages.last_mut() {
@@ -200,6 +229,13 @@ pub struct Chat {
     transcript: WindowId,
     terri: WindowId,
     header: WindowId,
+    diagnostic: WindowId,
+    models: Vec<models::Model>,
+    configured_model: String,
+    previous_model: Option<String>,
+    picker: Option<WindowId>,
+    retry_at: Option<Instant>,
+    retries: u8,
     worker: Option<Worker>,
     history: Vec<Message>,
     pending: Option<String>,
@@ -233,7 +269,7 @@ impl Chat {
             );
         }
         c.desktop.status.text = format!(
-            " {} · Tools disabled | Enter Send · Esc Cancel · PgUp/Dn Scroll · F2/F3 Panel · F5 Retry · Ctrl+Q Quit",
+            " {} · Tools disabled | Enter Send · Esc Cancel · PgUp/Dn Scroll · F2/F3 Panel · F5 Retry · F6 Models · Ctrl+Q Quit",
             self.config.ollama.model
         );
         c.redraw();
@@ -268,6 +304,7 @@ impl Chat {
                     Layout::Window(self.header),
                 ),
                 (Length::Flex(1), body),
+                (Length::Fixed(4), Layout::Window(self.diagnostic)),
                 (Length::Fixed(1), Layout::Window(self.input)),
             ],
         };
@@ -303,15 +340,82 @@ impl Chat {
         };
         c.set_timer(TICK, Deadline(Instant::now() + interval));
     }
+    fn notice(&self, c: &mut Context<'_, ()>, text: String) {
+        if let Some(t) = self.widget::<Transcript>(c, self.diagnostic)
+            && !t.replace_notice(text)
+        {
+            return;
+        }
+        c.redraw();
+    }
+    fn picker(&mut self, c: &mut Context<'_, ()>) {
+        if c.desktop.has_modal() {
+            return;
+        }
+        if self.models.is_empty() {
+            self.notice(c, "No discovered models. F5 refreshes discovery.".into());
+            return;
+        }
+        let mut list = Panel::new(
+            "Models · ↑/↓ · Enter selects · Esc closes",
+            self.models.iter().map(models::Model::label).collect(),
+        );
+        if let Some(index) = self
+            .models
+            .iter()
+            .position(|m| m.name == self.config.ollama.model)
+        {
+            list.select(index);
+        }
+        self.picker = Some(c.desktop.show_modal(
+            ModelPicker {
+                list,
+                names: self.models.iter().map(|m| m.name.clone()).collect(),
+            },
+            terrabox::Size {
+                width: 80,
+                height: 16,
+            },
+        ));
+        c.redraw();
+    }
+    fn activate(&mut self, c: &mut Context<'_, ()>, name: String) {
+        // Dropping the worker cancels I/O and destroys its receiver, including queued stale text.
+        self.worker = None;
+        self.cue_worker = None;
+        self.pending = None;
+        self.response.clear();
+        self.retry_at = None;
+        self.config.ollama.model = name.clone();
+        self.previous_model = Some(name.clone());
+        self.ready = true;
+        let saved = models::path()
+            .ok_or_else(|| "No state directory available".to_string())
+            .and_then(|p| models::save(&p, &self.config.ollama.endpoint, &name));
+        self.notice(
+            c,
+            match saved {
+                Ok(()) => format!("Selected {name}. Completed conversation history retained."),
+                Err(e) => format!("Selected {name}; selection could not be saved: {e}"),
+            },
+        );
+        self.status(c, "Connected");
+        self.pet_event(c, PetEvent::Idle);
+        self.schedule(c);
+    }
     fn check(&mut self, c: &mut Context<'_, ()>) {
         self.worker = None;
         self.cue_worker = None;
         self.ready = false;
+        self.retry_at = None;
         match Worker::start(self.config.ollama.clone(), None) {
             Ok(w) => {
                 self.worker = Some(w);
                 self.status(c, "Checking connection");
-                self.pet_event(c, PetEvent::Thinking);
+                self.pet_event(c, PetEvent::Idle);
+                if let Some(t) = self.widget::<Terri>(c, self.terri) {
+                    t.pet.traits.mood = crate::pet::Mood::Curious;
+                }
             }
             Err(e) => self.fail(c, format!("Cannot start model worker: {e}")),
         }
@@ -322,9 +426,15 @@ impl Chat {
         self.pending = None;
         self.response.clear();
         self.ready = false;
-        if let Some(t) = self.transcript(c) {
-            t.add("Connection / request error", error);
+        if self.retries < 2
+            && (error.contains("unavailable at")
+                || error.contains("timeout")
+                || error.contains("Ollama check failed"))
+        {
+            self.retries += 1;
+            self.retry_at = Some(Instant::now() + Duration::from_secs(2 * u64::from(self.retries)));
         }
+        self.notice(c, error);
         self.status(c, "Error · F5 retries");
         self.pet_event(c, PetEvent::Error);
     }
@@ -378,7 +488,7 @@ impl Chat {
         match Worker::start(self.config.ollama.clone(), Some(messages)) {
             Ok(w) => {
                 self.worker = Some(w);
-                self.status(c, "Thinking · Esc cancels");
+                self.status(c, "Loading model / thinking · Esc cancels");
                 self.pet_event(c, PetEvent::Thinking);
             }
             Err(e) => self.fail(c, e.to_string()),
@@ -389,11 +499,34 @@ impl Chat {
         for _ in 0..32 {
             let update = self.worker.as_mut().map(|w| w.receiver.try_recv());
             match update {
-                Some(Ok(Update::Ready)) => {
+                Some(Ok(Update::Discovered(models))) => {
                     self.worker = None;
-                    self.ready = true;
-                    self.status(c, "Connected");
-                    self.pet_event(c, PetEvent::Idle);
+                    self.models = models;
+                    self.retries = 0;
+                    if let Some(model) = models::select(
+                        &self.models,
+                        &self.configured_model,
+                        self.previous_model.as_deref(),
+                    ) {
+                        let name = model.name.clone();
+                        let missing = self.configured_model != "auto"
+                            && models::configured(&self.models, &self.configured_model).is_none();
+                        self.config.ollama.model = name.clone();
+                        self.previous_model = Some(name.clone());
+                        self.ready = true;
+                        self.notice(c, if missing { format!("Configured model '{}' unavailable. Using {name}; F6 shows installed alternatives. Configuration preserved.", self.configured_model) } else { format!("Using {name}. F6 changes models.") });
+                        self.status(c, "Connected");
+                        self.pet_event(c, PetEvent::Idle);
+                        if let Some(t) = self.widget::<Terri>(c, self.terri) {
+                            t.pet.traits.mood = if missing {
+                                crate::pet::Mood::Confused
+                            } else {
+                                crate::pet::Mood::Happy
+                            };
+                        }
+                    } else {
+                        self.fail(c, if self.models.is_empty() { "Ollama reachable but no models installed. Install a chat model using Ollama, then F5." } else { "No suitable chat models found. F6 lists installed models; F5 refreshes discovery." }.into());
+                    }
                 }
                 Some(Ok(Update::Text(s))) => {
                     self.response.push_str(&s);
@@ -453,6 +586,9 @@ impl Chat {
             _ => {}
         }
         let now = Instant::now();
+        if self.worker.is_none() && self.retry_at.is_some_and(|at| now >= at) {
+            self.check(c);
+        }
         let elapsed = now.saturating_duration_since(self.last_tick);
         self.last_tick = now;
         if let Some(t) = self.widget::<Terri>(c, self.terri) {
@@ -495,6 +631,18 @@ impl App for Chat {
     fn event(&mut self, e: AppEvent<()>, c: &mut Context<'_, ()>) -> io::Result<()> {
         match e {
             AppEvent::Timer(TICK) => self.tick(c),
+            AppEvent::Command(SELECT_MODEL) => {
+                let name = self
+                    .picker
+                    .and_then(|id| c.desktop.widget_mut::<ModelPicker>(id))
+                    .and_then(|p| p.list.selected().and_then(|i| p.names.get(i)).cloned());
+                c.desktop.close_modal();
+                self.picker = None;
+                if let Some(name) = name {
+                    self.activate(c, name);
+                }
+            }
+            AppEvent::Command(QUIT) => c.quit(),
             AppEvent::Command(SEND) => self.send(c),
             AppEvent::Command(EDIT) => {
                 self.cue_worker = None;
@@ -511,13 +659,12 @@ impl App for Chat {
                     c.quit();
                 } else {
                     match k.key {
-                        Key::Escape if self.worker.is_some() => {
+                        Key::Escape if self.worker.is_some() || self.retry_at.is_some() => {
                             self.worker = None;
                             self.pending = None;
                             self.response.clear();
-                            if let Some(t) = self.transcript(c) {
-                                t.add("Cancelled","Incomplete turn excluded from model history. Your draft is preserved.".into());
-                            }
+                            self.retry_at = None;
+                            self.notice(c, "Cancelled. Incomplete turn excluded from model history. Your draft is preserved.".into());
                             self.status(
                                 c,
                                 if self.ready {
@@ -549,8 +696,14 @@ impl App for Chat {
                             self.panel = (self.panel + 2).min(48);
                             self.layout(c);
                         }
-                        Key::Function(5) if self.worker.is_none() => self.check(c),
-                        Key::Function(6) => {
+                        Key::Function(5) => {
+                            self.pending = None;
+                            self.response.clear();
+                            self.retries = 0;
+                            self.check(c);
+                        }
+                        Key::Function(6) => self.picker(c),
+                        Key::Function(9) => {
                             self.config.interface.animation = !self.config.interface.animation;
                             if let Some(t) = self.widget::<Terri>(c, self.terri) {
                                 t.animate = self.config.interface.animation;
@@ -623,6 +776,7 @@ pub fn run(config: Config) -> io::Result<()> {
     };
     let mut controls = Group::default();
     let header = controls.add(Label(String::new()), false);
+    let diagnostic = controls.add(Transcript::new(), false);
     let mut state_path = if config.pet.persist {
         persistence::default_path()
     } else {
@@ -674,6 +828,14 @@ pub fn run(config: Config) -> io::Result<()> {
     .ok_or_else(|| io::Error::other("Invalid frame interval"))?;
     Application::new(
         Chat {
+            configured_model: config.ollama.model.clone(),
+            previous_model: models::path()
+                .and_then(|p| models::load(&p, &config.ollama.endpoint).ok().flatten()),
+            models: vec![],
+            picker: None,
+            diagnostic,
+            retry_at: None,
+            retries: 0,
             group,
             config,
             input,
@@ -755,6 +917,17 @@ mod tests {
         assert_eq!(wrap("a界e\u{301}", 3), vec!["a界", "e\u{301}"]);
         assert_eq!(clean("a\x1b\x07\nb"), "a\nb");
         assert!(wrap("x", 0).is_empty());
+    }
+    #[test]
+    fn diagnostic_replaces_and_suppresses_duplicates() {
+        let mut t = Transcript::new();
+        assert!(t.replace_notice("offline".into()));
+        assert!(!t.replace_notice("offline".into()));
+        assert!(t.replace_notice("restored".into()));
+        assert_eq!(
+            t.messages,
+            vec![("Ollama status".into(), "restored".into())]
+        );
     }
     #[test]
     fn transcript_is_bounded() {

@@ -36,7 +36,7 @@ impl Default for Ollama {
     fn default() -> Self {
         Self {
             endpoint: "http://127.0.0.1:11434".into(),
-            model: "qwen3:8b".into(),
+            model: "auto".into(),
             num_ctx: 8192,
             num_predict: 2048,
             timeout_seconds: 300,
@@ -178,7 +178,7 @@ mod tests {
     use super::*;
     #[test]
     fn defaults_and_partial() {
-        assert_eq!(Config::parse("").unwrap().ollama.model, "qwen3:8b");
+        assert_eq!(Config::parse("").unwrap().ollama.model, "auto");
         assert_eq!(
             Config::parse("[interface]\nanimation=false")
                 .unwrap()

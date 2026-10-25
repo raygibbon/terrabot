@@ -23,7 +23,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
     def do_GET(self):
-        body = json.dumps({"models": [{"name": "test:latest"}]}).encode()
+        body = json.dumps({"models": self.server.models}).encode()
+        if self.server.unavailable:
+            self.send_response(503)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -135,6 +140,10 @@ class Smoke(unittest.TestCase):
         cls.server.stop_event.set()
         cls.server.shutdown()
         cls.server.server_close()
+    def setUp(self):
+        self.server.models = [{"name": "test:latest"}]
+        self.server.unavailable = False
+
     def test_stream_history_resize_typing_and_normal_exit(self):
         self.server.requests.clear()
         t = Terminal(self.endpoint)
@@ -224,9 +233,65 @@ class Smoke(unittest.TestCase):
         t = Terminal(self.endpoint, "absent")
         try:
             t.wait_for("unavailable")
-            t.wait_for("ollama pull absent")
+            t.wait_for("Using test:latest")
+            t.send(b"\x1b[17~")
+            t.wait_for("Models")
         finally:
             t.close(b"\x03")
+    def test_empty_models(self):
+        self.server.models = []
+        t = Terminal(self.endpoint, "auto")
+        try:
+            t.wait_for("no models installed")
+            self.assertNotIn(b"Connection / request error", t.output)
+            self.server.models = [{"name": "restored:exact", "size": 1000}]
+            t.send(b"\x1b[15~")
+            t.wait_for("Using restored:exact")
+        finally:
+            t.close()
+
+    def test_recovery_and_bounded_diagnostics(self):
+        self.server.unavailable = True
+        t = Terminal(self.endpoint, animation=False)
+        try:
+            t.wait_for("Ollama check failed")
+            t.send(b"\x1b[15~")
+            t.pump(0.3)
+            self.assertNotIn(b"Connection / request error", t.output)
+            self.server.unavailable = False
+            t.wait_for("Connected", timeout=6)
+            t.send("recovered\r")
+            t.wait_for("streamed reply.")
+        finally:
+            t.close()
+
+    def test_switch_cancels_generation_preserves_history_and_saves(self):
+        self.server.models = [{"name": "a:exact", "size": 1073741824}, {"name": "b:exact"}]
+        self.server.requests.clear()
+        t = Terminal(self.endpoint, "auto")
+        try:
+            t.wait_for("Using a:exact")
+            t.send("first\r")
+            t.wait_for("streamed reply.")
+            t.pump(0.2)
+            t.send("stall\r")
+            t.pump(0.3)
+            t.send(b"\x1b[17~")
+            t.wait_for("1.0 GiB")
+            t.send(b"\x1b[B\r")
+            t.wait_for("Selected b:exact")
+            saved = json.loads((Path(t.directory.name) / "terrabot/models.json").read_text())
+            self.assertEqual(saved["models"][self.endpoint], "b:exact")
+            t.send("after switch\r")
+            t.pump(0.7)
+            request = self.server.requests[-1]
+            self.assertEqual(request["model"], "b:exact")
+            self.assertEqual([m["role"] for m in request["messages"]], ["system", "user", "assistant", "user"])
+            self.assertNotIn("stall", str(request))
+            self.assertEqual(request["messages"][2]["content"], "Hello 世界 — streamed reply.")
+        finally:
+            t.close()
+
     def test_unavailable_server(self):
         t = Terminal("http://127.0.0.1:1", animation=False)
         try:
