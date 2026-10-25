@@ -1,4 +1,4 @@
-# Terrabot v0.4 — Terri
+# Terrabot v0.4.2 — Terri
 
 Terri is a curious, technically capable AI companion who lives in your terminal.
 Her handcrafted lilac coat, mint orb, expressive eyes and tiny feet are drawn
@@ -264,7 +264,7 @@ cargo run --release --example terri-demo -- --clip Jump
 | `,` / `;` | Slower / faster playback, 0.1×–3× |
 | X | Cycle facial expressions independently |
 | V | Reverse facing |
-| G | Toggle sprite extent and ground/center anchors |
+| G | Toggle bounds, ground, origin, face, hands, feet and orb anchors |
 | Enter | Replay selected clip from the start |
 | Z | Return to autonomous life and clear preview overrides |
 
@@ -290,3 +290,26 @@ clipped, half-size logical-pixel rendering.
 Real before/after terminal recordings and capture instructions are described in
 [the recording notes](docs/captures/README.md). No graphical assets or alternative
 rendering backends are used.
+
+## v0.4.2 pixel-art repair
+
+Terri now uses a fixed 36×36 logical canvas and authored standing, lowering,
+seated, curled, stretched and forward-leaning run silhouettes. The old inverse
+sampling, vertical scaling, compensating width changes and shear are removed.
+Only the root translates during a jump. Shoulder/hip attachments keep limbs
+connected, with back limbs, torso, face and foreground hands composed before a
+single one-pixel dark-purple silhouette boundary is applied.
+
+Walking and running advance by distance travelled, retaining phase when changing
+between gaits. Rest and wake sequences use intermediate artwork. The orb has
+explicit pickup, held, thrown, bouncing and return states; held coordinates use
+the same hand anchors and root as the character, including reversed facing.
+The G overlay also reports velocity, clip/frame, shape transition and orb state.
+Character proportions remain 1:1; compact terminals retain the existing reduced
+output scale. No chat, life simulation, configuration or persistence format changed.
+
+Regression coverage includes all-frame silhouette connectivity, outline and
+ground bounds, mirrored orb pickup/release continuity, and 48 reviewed full-colour
+terminal-cell references across eight clips. References are never automatically
+updated. See [the repair review and actual terminal comparisons](docs/captures/v042/README.md)
+for captures, reproduction steps and measured validation results.

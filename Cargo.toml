@@ -1,6 +1,6 @@
 [package]
 name = "terrabot"
-version = "0.4.0"
+version = "0.4.2"
 edition = "2024"
 license = "MIT"
 description = "Local Ollama chat with Terri, a living terminal companion"

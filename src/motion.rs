@@ -77,6 +77,8 @@ pub enum Playback {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
     Stand,
+    Crouch,
+    Run,
     Seat,
     Curl,
     Stretch,
@@ -125,6 +127,8 @@ const fn f(
 }
 const ST: Shape = Shape::Stand;
 const SE: Shape = Shape::Seat;
+const CR: Shape = Shape::Crouch;
+const RN: Shape = Shape::Run;
 const CU: Shape = Shape::Curl;
 const SX: Shape = Shape::Stretch;
 const DOWN: [(i32, i32); 2] = [(0, 19), (28, 19)];
@@ -139,49 +143,49 @@ const WALK: &[Frame] = &[
     f(
         120,
         ST,
-        -0.4,
         0.,
-        0.98,
-        [(1, 17), (28, 20)],
-        [(5, 27), (21, 25)],
+        0.,
+        1.,
+        [(1, 17), (27, 20)],
+        [(7, 27), (20, 25)],
         Some(MotionEvent::Step),
     ),
     f(
         100,
         ST,
         0.,
+        0.,
         1.,
-        1.02,
-        [(0, 18), (27, 18)],
-        [(9, 27), (18, 24)],
+        [(1, 18), (27, 18)],
+        [(5, 27), (17, 24)],
         None,
     ),
     f(
         120,
         ST,
-        0.4,
         0.,
-        0.98,
-        [(0, 20), (27, 17)],
-        [(9, 25), (22, 27)],
+        0.,
+        1.,
+        [(1, 20), (27, 17)],
+        [(6, 25), (19, 27)],
         Some(MotionEvent::Step),
     ),
     f(
         100,
         ST,
         0.,
+        0.,
         1.,
-        1.02,
-        [(0, 18), (27, 18)],
-        [(8, 24), (19, 27)],
+        [(1, 18), (27, 18)],
+        [(9, 24), (17, 27)],
         None,
     ),
 ];
 const RUN: &[Frame] = &[
     f(
         75,
-        ST,
-        3.,
+        RN,
+        0.,
         0.,
         0.93,
         [(1, 13), (27, 22)],
@@ -190,9 +194,9 @@ const RUN: &[Frame] = &[
     ),
     f(
         65,
-        SX,
-        4.,
-        3.,
+        RN,
+        0.,
+        2.,
         1.,
         [(0, 15), (27, 20)],
         [(10, 23), (17, 22)],
@@ -200,8 +204,8 @@ const RUN: &[Frame] = &[
     ),
     f(
         75,
-        ST,
-        3.,
+        RN,
+        0.,
         0.,
         0.93,
         [(0, 22), (28, 13)],
@@ -210,9 +214,9 @@ const RUN: &[Frame] = &[
     ),
     f(
         65,
-        SX,
-        4.,
-        3.,
+        RN,
+        0.,
+        2.,
         1.,
         [(1, 20), (27, 15)],
         [(9, 22), (18, 23)],
@@ -220,9 +224,9 @@ const RUN: &[Frame] = &[
     ),
 ];
 const JUMP: &[Frame] = &[
-    f(220, SE, -1., 0., 0.96, [(1, 23), (27, 23)], FEET, None),
-    f(100, SX, 0., 2., 1.06, UP, FEET, Some(MotionEvent::Takeoff)),
-    f(180, SX, 0., 7., 1., UP, [(6, 24), (21, 24)], None),
+    f(220, CR, 0., 0., 1.0, [(1, 23), (27, 23)], FEET, None),
+    f(100, ST, 0., 2., 1.06, UP, FEET, Some(MotionEvent::Takeoff)),
+    f(180, ST, 0., 7., 1., UP, [(6, 24), (21, 24)], None),
     f(
         180,
         ST,
@@ -236,7 +240,7 @@ const JUMP: &[Frame] = &[
     f(120, ST, 0., 3., 1., DOWN, FEET, None),
     f(
         130,
-        SE,
+        CR,
         0.,
         0.,
         0.94,
@@ -247,7 +251,7 @@ const JUMP: &[Frame] = &[
     f(220, ST, 0., 0., 1., DOWN, FEET, None),
 ];
 const SIT: &[Frame] = &[
-    f(180, ST, -1., 0., 0.96, DOWN, FEET, None),
+    f(180, CR, 0., 0., 1.0, DOWN, FEET, None),
     f(
         220,
         SE,
@@ -270,17 +274,9 @@ const SIT: &[Frame] = &[
     ),
 ];
 const SLEEP: &[Frame] = &[
-    f(250, SE, 0., 0., 1., DOWN, FEET, None),
-    f(
-        350,
-        CU,
-        1.,
-        0.,
-        1.,
-        [(7, 24), (23, 24)],
-        [(6, 27), (22, 27)],
-        None,
-    ),
+    f(180, CR, 0., 0., 1., DOWN, FEET, None),
+    f(260, SE, 0., 0., 1., [(4, 23), (24, 23)], FEET, None),
+    f(400, CU, 0., 0., 1., [(7, 24), (23, 24)], FEET, None),
     f(
         1800,
         CU,
@@ -296,17 +292,18 @@ const SLEEP: &[Frame] = &[
         CU,
         0.,
         0.,
-        1.03,
-        [(9, 24), (22, 24)],
+        1.,
+        [(9, 23), (22, 23)],
         [(7, 27), (21, 27)],
         None,
     ),
 ];
 const WAKE: &[Frame] = &[
-    f(280, CU, 0., 0., 1., DOWN, FEET, None),
-    f(320, SE, -1., 0., 1., [(2, 16), (27, 16)], FEET, None),
-    f(650, SX, -1., 0., 1.04, UP, FEET, None),
-    f(260, ST, 1., 0., 1., [(0, 13), (28, 13)], FEET, None),
+    f(280, CU, 0., 0., 1., [(9, 24), (22, 24)], FEET, None),
+    f(280, SE, 0., 0., 1., [(4, 23), (24, 23)], FEET, None),
+    f(220, CR, 0., 0., 1., [(2, 16), (27, 16)], FEET, None),
+    f(450, SX, 0., 0., 1., UP, FEET, None),
+    f(180, CR, 0., 0., 1., [(0, 13), (28, 13)], FEET, None),
     f(300, ST, 0., 0., 1., DOWN, FEET, None),
 ];
 const THINK: &[Frame] = &[
@@ -447,7 +444,7 @@ pub fn clip(id: ClipId) -> Clip {
         interruptible: !matches!(id, Jump | Stumble | Wake | Celebrate),
         loop_from: match id {
             Sit => 2,
-            Sleep => 2,
+            Sleep => 3,
             _ => 0,
         },
     }
@@ -487,11 +484,38 @@ impl Timeline {
         if !force && !self.complete && !old.interruptible && clip(id).priority <= old.priority {
             return false;
         }
+        let gait = |id| matches!(id, ClipId::Walk | ClipId::Run);
+        let phase = if !force && gait(self.id) && gait(id) {
+            let total: u32 = old.frames.iter().map(|f| f.ms).sum();
+            let elapsed: u32 = old
+                .frames
+                .iter()
+                .take(self.index)
+                .map(|f| f.ms)
+                .sum::<u32>()
+                + self.elapsed_ms;
+            Some(elapsed as f64 / total as f64)
+        } else {
+            None
+        };
         *self = Self {
             id,
             ..Self::default()
         };
+        if let Some(phase) = phase {
+            let total: u32 = clip(id).frames.iter().map(|f| f.ms).sum();
+            self.advance(Duration::from_secs_f64(phase * f64::from(total) / 1000.0));
+            self.count = 0;
+            self.events = [None; 8];
+        }
         true
+    }
+    /// Gait timing follows normalized travel, not render-frame count.
+    pub fn advance_distance(&mut self, distance: f32, stride: f32) {
+        let cycle: u32 = clip(self.id).frames.iter().map(|f| f.ms).sum();
+        self.advance(Duration::from_secs_f64(
+            f64::from(distance.abs() / stride) * f64::from(cycle) / 1000.0,
+        ));
     }
     pub fn frame(&self) -> Frame {
         clip(self.id).frames[self.index]
@@ -648,6 +672,25 @@ impl Face {
 mod tests {
     use super::*;
     #[test]
+    fn gait_distance_is_independent_of_frame_partition() {
+        let mut a = Timeline::default();
+        let mut b = Timeline::default();
+        a.request(ClipId::Walk, true);
+        b.request(ClipId::Walk, true);
+        for _ in 0..20 {
+            a.advance_distance(0.003, 0.08);
+        }
+        for _ in 0..10 {
+            b.advance_distance(0.006, 0.08);
+        }
+        assert_eq!((a.index, a.elapsed_ms), (b.index, b.elapsed_ms));
+        let index = a.index;
+        a.request(ClipId::Run, false);
+        assert_eq!(a.index, index);
+        a.advance_distance(0.0, 0.1);
+        assert_eq!(a.index, index);
+    }
+    #[test]
     fn fractional_frames_and_long_frame_step() {
         let mut a = Timeline::default();
         let mut b = Timeline::default();
@@ -662,6 +705,8 @@ mod tests {
         assert_eq!(a.index, 2);
         a.step_frame();
         assert_eq!(a.index, 3);
+        a.step_frame();
+        assert_eq!(a.index, 4);
     }
     #[test]
     fn durations_loops_and_pingpong() {
