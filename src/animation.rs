@@ -249,7 +249,7 @@ impl Pose {
         Self {
             squash: 1.0,
             lean: 0.0,
-            lift: frame.lift * amount,
+            lift: frame.lift.min(3.0) * amount,
             arm: 0.0,
         }
     }
@@ -301,7 +301,7 @@ pub struct Terri {
     transition: f32,
     previous_frame: crate::motion::Frame,
     previous_index: usize,
-    trail: [(f32, f32); 6],
+    trail: [(f32, f32, f32); 6],
     trail_clock: f32,
     pub land_flash: f32,
 }
@@ -316,11 +316,11 @@ impl Terri {
             travel_delta: 0.0,
             preview_time: 0.0,
             orb_x: pet.orb.x,
-            orb_height: pet.orb.height,
+            orb_height: 19.0,
             orb_velocity: 0.0,
             orb_held: false,
-            orb_state: OrbState::Resting,
-            orb_offset: 0.0,
+            orb_state: OrbState::Floating,
+            orb_offset: 22.0,
             pick_time: 0.0,
             timeline: Timeline::default(),
             face: Face::default(),
@@ -332,7 +332,7 @@ impl Terri {
             transition: 1.0,
             previous_frame: crate::motion::clip(ClipId::Idle).frames[0],
             previous_index: 0,
-            trail: [(pet.orb.x, pet.orb.height); 6],
+            trail: [(pet.x, 19.0, 22.0); 6],
             trail_clock: 0.0,
             land_flash: 0.0,
             pet,
@@ -377,11 +377,11 @@ impl Terri {
         self.timeline.request(id, true);
         self.transition = 0.0;
         self.orb_held = false;
-        self.orb_state = OrbState::Returning;
+        self.orb_state = OrbState::Floating;
         if id == ClipId::Play {
             self.orb_x = self.visual_x;
             self.orb_height = 3.0;
-            self.orb_offset = 0.0;
+            self.orb_offset = 22.0;
             self.orb_state = OrbState::Resting;
         }
     }
@@ -421,7 +421,7 @@ impl Terri {
                     } else {
                         0.4
                     };
-                    self.visual_x = 0.5 + (self.preview_time * frequency).sin() * 0.3;
+                    self.visual_x = 0.5 + (self.preview_time * frequency).sin() * 0.04;
                     self.velocity = (self.visual_x - old) / elapsed.as_secs_f32().max(0.001);
                     self.visual_x - old
                 } else {
@@ -523,23 +523,24 @@ impl Terri {
                 }
             }
             OrbState::Resting | OrbState::Floating => {
-                let (x, h) = if self.timeline.id == ClipId::Think {
-                    (
-                        self.visual_x + 0.16,
-                        30.0 + (self.face.clock * 2.0).sin() * amount,
-                    )
-                } else if self.timeline.id == ClipId::Play {
-                    (self.visual_x, 3.0)
+                let sleeping = self.timeline.id == ClipId::Sleep;
+                let playful = matches!(self.timeline.id, ClipId::Curious | ClipId::Bored);
+                let h = if sleeping || self.timeline.id == ClipId::Play {
+                    3.0
+                } else if playful {
+                    8.0 + (self.face.clock * 2.0).sin().abs() * 5.0 * amount
                 } else {
-                    (self.pet.orb.x, self.pet.orb.height)
+                    19.0 + (self.face.clock * 1.5).sin() * amount
                 };
+                let x = self.visual_x;
+                let side = if self.facing() < 0.0 { -22.0 } else { 22.0 };
                 self.orb_state = if h > 3.1 {
                     OrbState::Floating
                 } else {
                     OrbState::Resting
                 };
                 self.orb_x += (x.clamp(0.0, 1.0) - self.orb_x) * ease;
-                self.orb_offset += (0.0 - self.orb_offset) * ease;
+                self.orb_offset += (side - self.orb_offset) * ease;
                 self.orb_height += (h - self.orb_height).clamp(-28.0 * dt, 28.0 * dt);
             }
         }
@@ -552,7 +553,7 @@ impl Terri {
         if self.trail_clock >= 0.05 {
             self.trail_clock %= 0.05;
             self.trail.rotate_right(1);
-            self.trail[0] = (self.orb_x, self.orb_height);
+            self.trail[0] = (self.orb_x, self.orb_height, self.orb_offset);
         }
     }
     pub fn label(&self) -> String {
@@ -627,14 +628,14 @@ impl Terri {
     }
     fn orb_anchor(&self) -> Point {
         let (hands, _) = self.contacts(self.timeline.frame());
-        let x = (hands[0].x + hands[1].x) / 2;
+        let x = hands[1].x + 3;
         Point::new(
             if self.facing() < 0.0 {
                 art::WIDTH as i32 - 1 - x
             } else {
                 x
             },
-            (hands[0].y + hands[1].y) / 2 - 3,
+            hands[1].y - 2,
         )
     }
     fn orb_position(&self, width: usize, ground: i32) -> Point {
@@ -649,7 +650,8 @@ impl Terri {
                 (2.0 + art::ORIGIN.x as f32
                     + self.orb_x * (width as f32 - art::WIDTH as f32 - 4.0).max(0.0)
                     + self.orb_offset)
-                    .round() as i32,
+                    .round()
+                    .clamp(3.0, width.saturating_sub(4).max(3) as f32) as i32,
                 ground - self.orb_height.round() as i32,
             )
         }
@@ -662,7 +664,6 @@ impl Terri {
         frame: crate::motion::Frame,
         _foot_index: usize,
     ) -> Result<Sprite, &'static str> {
-        let glow = Color::Rgb(105, 223, 206);
         let mut body = Sprite::new(art::WIDTH, art::HEIGHT).ok_or("Invalid sprite bounds")?;
         let model = art::model(frame.shape, BODY);
         let (hands, feet) = self.contacts(frame);
@@ -709,7 +710,7 @@ impl Terri {
                 let gaze = (self.face.gaze * facing).round() as i32;
                 body.put(cx + 1 + gaze, cy, light);
                 body.put(cx + 1 + gaze, cy + 1, light);
-                body.put(cx + 2, cy + tall - 1, glow);
+                body.put(cx + 2, cy + tall - 1, light);
                 if expression == Expression::Sad {
                     body.put(cx + if i == 0 { 3 } else { 0 }, cy - 2, eye);
                 }
@@ -759,27 +760,6 @@ impl Terri {
         }
         let ground = height as i32 - 3;
         let low = Color::Rgb(52, 65, 87);
-        world.line(1, ground, width as i32 - 2, low);
-        // Resting cushion and a small sprout stay secondary to the character.
-        let resting =
-            (16.0 + self.pet.traits.life.favourite_rest * (width as f32 - 34.0).max(0.0)) as i32;
-        world.art(
-            &[
-                "  oooooooooooooo  ",
-                " obccccddddccccbo ",
-                "obbbbbbbbbbbbbbbbo",
-                " oooooooooooooooo ",
-            ],
-            resting - 9,
-            ground - 4,
-        );
-        world.line(resting - 5, ground - 3, 10, Color::Rgb(151, 120, 172));
-        let plant = (16.0 + crate::life::PLANT * (width as f32 - 34.0).max(0.0)) as i32;
-        world.art(
-            &[" e e ", " eee ", "  e  ", " bbb ", " bbb "],
-            plant - 2,
-            ground - 5,
-        );
         let body = self.body(self.timeline.frame(), self.timeline.index)?;
         let facing = self.facing();
         let t = if self.animate { self.face.clock } else { 0.0 };
@@ -817,31 +797,42 @@ impl Terri {
         } else {
             0.0
         };
-        let glow = Color::Rgb(
-            105,
-            (215.0 + pulse) as u8,
-            if self.pet.thinking { 240 } else { 206 },
-        );
-        for dy in -2i32..=2 {
-            for dx in -2i32..=2 {
-                if dx * dx + dy * dy <= 5 {
-                    world.put(
-                        orb_x as i32 + dx,
-                        orb_y as i32 + dy,
-                        if [(-1, 0), (1, 0), (0, -1), (0, 1)]
-                            .iter()
-                            .any(|(x, y)| (dx + x) * (dx + x) + (dy + y) * (dy + y) > 5)
-                        {
-                            ink('o').unwrap()
-                        } else if dx <= 0 && dy <= 0 {
-                            light
-                        } else if dx + dy > 2 {
-                            Color::Rgb(45, 135, 139)
-                        } else {
-                            glow
-                        },
-                    );
+        let dim = sleep;
+        let flash = matches!(self.timeline.id, ClipId::Happy | ClipId::Celebrate)
+            && self.timeline.elapsed_ms < 180
+            && self.animate
+            && self.intensity > 0.0;
+        let glow = if dim {
+            Color::Rgb(65, 162, 158)
+        } else {
+            Color::Rgb(
+                if flash { 145 } else { 45 },
+                (230.0 + pulse).clamp(0.0, 255.0) as u8,
+                218,
+            )
+        };
+        // Compact luminous orb. Never paint its halo over the character.
+        for dy in -3i32..=3 {
+            for dx in -3i32..=3 {
+                let radius = dx * dx + dy * dy;
+                if radius > 10 {
+                    continue;
                 }
+                let px = orb_x as i32 + dx;
+                let py = orb_y as i32 + dy;
+                if world.get(px as usize, py as usize).is_some() {
+                    continue;
+                }
+                let color = if radius >= 8 {
+                    Color::Rgb(24, 103, 115)
+                } else if dx == 0 && dy == 0 {
+                    if dim { glow } else { light }
+                } else if dx <= 0 && dy <= 0 {
+                    Color::Rgb(145, 255, 249)
+                } else {
+                    glow
+                };
+                world.put(px, py, color);
             }
         }
         // Six retained trail samples; no per-frame particle allocation.
@@ -849,22 +840,23 @@ impl Terri {
             && self.intensity > 0.0
             && (play || self.preview == Some(ClipId::Play) || self.pet.thinking)
         {
-            for (i, (x, h)) in self.trail.iter().enumerate().skip(1) {
+            for (i, (x, h, offset)) in self.trail.iter().enumerate().skip(1) {
                 let c = Color::Rgb(45, 145 - i as u8 * 12, 140 - i as u8 * 10);
                 let px = (2.0
                     + art::ORIGIN.x as f32
-                    + x * (width as f32 - art::WIDTH as f32 - 4.0).max(0.0))
-                .round() as i32;
+                    + x * (width as f32 - art::WIDTH as f32 - 4.0).max(0.0)
+                    + offset)
+                    .round() as i32;
                 let py = (ground as f32 - h).round() as i32;
                 if world.get(px as usize, py as usize).is_none() {
                     world.put(px, py, c);
                 }
             }
         }
-        if self.animate && self.intensity > 0.0 {
+        if self.animate && self.intensity > 0.0 && (play || self.preview == Some(ClipId::Play)) {
             for n in 0..3 {
                 let phase = t * 0.7 + n as f32 * 2.1;
-                let x = (width as f32 * (0.2 + n as f32 * 0.3)) as i32;
+                let x = orb.x + n * 4 - 4;
                 let y = ground - 5 - (phase.sin() * 2.0) as i32;
                 if world.get(x as usize, y as usize).is_none() {
                     world.put(x, y, Color::Rgb(49, 76, 85));
@@ -932,12 +924,12 @@ impl Widget for Terri {
         if size.width < 4 || size.height < 3 {
             return;
         }
-        let scale = if size.width < 68 || size.height < 21 {
+        let scale = if size.width < 48 || size.height < 21 {
             2
         } else {
             1
         };
-        let width = (usize::from(size.width) * scale).min(100);
+        let width = (usize::from(size.width) * scale).min(64);
         let height = (usize::from(size.height.saturating_sub(2)) * 2 * scale).clamp(4, 44);
         match self.compose(width, height) {
             Ok(sprite) => {
@@ -1010,6 +1002,55 @@ pub fn validate_fps(fps: u32) -> io::Result<Duration> {
 mod tests {
     use super::*;
     use terrabox::{Rect, Size, Surface};
+    #[test]
+    fn eye_palette_and_composition_do_not_leak_turquoise() {
+        let mut t = default_terri();
+        for id in ClipId::ALL {
+            t.preview_clip(id);
+            for index in 0..crate::motion::clip(id).frames.len() {
+                t.timeline.index = index;
+                let frame = t.timeline.frame();
+                let model = art::model(frame.shape, BODY);
+                for expression in Expression::ALL {
+                    t.face.expression = expression;
+                    let body = t.body(frame, index).unwrap();
+                    for eye in model.eyes {
+                        for y in eye.y..eye.y + 6 {
+                            for x in eye.x..eye.x + 4 {
+                                if let Some(Color::Rgb(r, g, b)) = body.get(x as usize, y as usize)
+                                {
+                                    assert!(
+                                        !(u16::from(g) > u16::from(r) + 20
+                                            && u16::from(b) > u16::from(r) + 20),
+                                        "teal eye {id:?}/{index}/{expression:?}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        t.preview_clip(ClipId::Idle);
+        t.face.expression = Expression::Neutral;
+        // Force a free orb behind the face: it must not overwrite any body pixel.
+        t.orb_x = t.visual_x;
+        t.orb_offset = 0.0;
+        t.orb_height = 16.0;
+        let world = t.compose(64, 44).unwrap();
+        let body = t.body(t.timeline.frame(), 0).unwrap();
+        for y in 0..art::HEIGHT {
+            for x in 0..art::WIDTH {
+                if let Some(color) = body.get(x, y) {
+                    assert_eq!(world.get(t.root_x(64) as usize + x, 10 + y), Some(color));
+                }
+            }
+        }
+        assert!(
+            world.get(1, 41).is_none(),
+            "no habitat floor or decorations"
+        );
+    }
     #[test]
     fn completed_character_is_connected_and_outlined() {
         let t = default_terri();
@@ -1098,7 +1139,7 @@ mod tests {
                 if t.orb_state == OrbState::Held {
                     held = true;
                     let (hands, _) = t.contacts(t.timeline.frame());
-                    let center = (hands[0].x + hands[1].x) / 2;
+                    let center = hands[1].x + 3;
                     let x = if facing < 0.0 {
                         art::WIDTH as i32 - 1 - center
                     } else {
@@ -1107,9 +1148,7 @@ mod tests {
                     assert_eq!(p.x, t.root_x(110) + x);
                     assert_eq!(
                         p.y,
-                        45 - art::ORIGIN.y - t.pose.lift.round() as i32
-                            + (hands[0].y + hands[1].y) / 2
-                            - 3
+                        45 - art::ORIGIN.y - t.pose.lift.round() as i32 + hands[1].y - 2
                     );
                 }
                 if old_state == OrbState::Held && t.orb_state == OrbState::Thrown {

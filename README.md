@@ -1,4 +1,4 @@
-# Terrabot v0.4.2 — Terri
+# Terrabot v0.4.3 — Terri
 
 Terri is a curious, technically capable AI companion who lives in your terminal.
 Her handcrafted lilac coat, mint orb, expressive eyes and tiny feet are drawn
@@ -313,3 +313,30 @@ ground bounds, mirrored orb pickup/release continuity, and 48 reviewed full-colo
 terminal-cell references across eight clips. References are never automatically
 updated. See [the repair review and actual terminal comparisons](docs/captures/v042/README.md)
 for captures, reproduction steps and measured validation results.
+
+
+## v0.4.3: Terri and the orb
+
+The scene is now Terri, her bright turquoise orb and a small ground shadow.
+Furniture, the full-width floor and idle ambient particles are gone. Eye shapes,
+expressions and gaze are preserved; the accidental mint eye pixels now use the
+existing light eye colour. Mint body accents remain below the face.
+
+The simulation constrains ordinary travel to the central home area. Rest, sleep,
+attention and exploration stay in place; wander and chase use brief local shuffles.
+Explore/search/investigate map to Curious, while play/balance/chase share the orb
+sequence after any shuffle. Needs, learned preferences and saved-state fields are
+retained. Old saved positions are clamped into the home area on load. The renderer
+uses the simulation position directly, with no recurring position overrides.
+
+The orb floats beside Terri, moves lower during curiosity/boredom, pulses during
+thinking, flashes during celebration and dims/settles during sleep. Pickup uses
+an outer hand anchor, away from the face; tosses and returns retain bounded
+physics. Orb pixels and trails cannot overwrite the character. Hops use at most
+three logical pixels of root lift. The compact scene and wider default chat-side
+panel make the artwork more prominent without stretching it; small terminals
+retain the existing half-resolution mode.
+
+F4 interactions, F6 model selection, streaming, cues and persistence remain in
+place. [Visual review, terminal captures and validation](docs/captures/v043/README.md)
+include 60 accepted terminal-cell references for the ten requested activities.

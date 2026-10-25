@@ -69,8 +69,10 @@ fn capture(id: ClipId, ms: u64) -> String {
 fn reviewed_terminal_cell_references() {
     for id in [
         ClipId::Idle,
-        ClipId::Walk,
-        ClipId::Run,
+        ClipId::Curious,
+        ClipId::Bored,
+        ClipId::Think,
+        ClipId::Talk,
         ClipId::Jump,
         ClipId::Sit,
         ClipId::Sleep,
@@ -86,7 +88,7 @@ fn reviewed_terminal_cell_references() {
                 std::fs::write(dir.join(name), actual).unwrap();
             } else {
                 let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/visual/v042")
+                    .join("tests/visual/v043")
                     .join(&name);
                 let expected = std::fs::read_to_string(&path)
                     .unwrap_or_else(|_| panic!("missing reviewed reference {}", path.display()));

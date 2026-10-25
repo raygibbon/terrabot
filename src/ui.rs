@@ -914,7 +914,7 @@ pub fn run(config: Config) -> io::Result<()> {
             cue_worker: None,
             state_path,
             clock,
-            panel: 42,
+            panel: 50,
         },
         desktop,
     )

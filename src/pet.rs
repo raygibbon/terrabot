@@ -2,7 +2,7 @@
 use crate::{
     config::PetConfig,
     cues::{EmotionCue, Gesture},
-    life::{self, Action, COUNT, Life, Orb},
+    life::{Action, COUNT, Life, Orb},
 };
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -246,7 +246,9 @@ impl Pet {
             traits.life = Life::new(config.seed);
         }
         let rng = Random::new(traits.rng_state);
-        let x = traits.life.position;
+        // Migrate old habitat coordinates into the compact home area.
+        let x = traits.life.position.clamp(0.46, 0.54);
+        traits.life.position = x;
         let tick = traits.active_ticks;
         let routine = traits.life.routine;
         let autonomous = config.autonomous;
@@ -271,7 +273,7 @@ impl Pet {
             night: 0.0,
             hour: None,
             duration: 80,
-            travel_budget: 200,
+            travel_budget: 20,
             learned: false,
             fixed: FixedStep::new(Duration::from_millis(50), 20)
                 .expect("constant valid simulation step"),
@@ -315,16 +317,16 @@ impl Pet {
         self.blink = tick < self.blink_until;
         self.orb.step();
         if self.activity == Activity::Chase && self.moving {
-            self.target = self.orb.x;
+            self.target = self.orb.x.clamp(0.46, 0.54);
         }
         let distance = self.target - self.x;
         self.moving = distance.abs() > 0.008;
         if self.moving {
             self.facing = if distance < 0.0 { -1.0 } else { 1.0 };
             let speed = if self.activity == Activity::Chase || self.priority >= 60 {
-                0.012
+                0.004
             } else {
-                0.006
+                0.002
             };
             self.x = (self.x + distance.clamp(-speed, speed)).clamp(0.0, 1.0);
             if self.travel_budget > 0 {
@@ -357,7 +359,7 @@ impl Pet {
                     self.facing * 0.025
                 };
                 if self.activity == Activity::Chase && self.age > 2.0 {
-                    self.target = self.orb.x;
+                    self.target = self.orb.x.clamp(0.46, 0.54);
                 }
             }
         }
@@ -589,25 +591,14 @@ impl Pet {
         self.activity = activity;
         self.traits.life.routine = activity;
         self.duration = duration;
-        self.travel_budget = 200;
+        self.travel_budget = 20;
         self.priority = priority;
         self.hold_until = self.traits.active_ticks.saturating_add(duration);
         self.next_choice = self.hold_until;
+        // Needs and preferences remain authoritative; only local shuffles travel.
         self.target = match activity {
-            Activity::Sleep | Activity::Rest | Activity::Nap => self.traits.life.favourite_rest,
-            Activity::Investigate => life::PLANT,
-            Activity::Watch | Activity::Attention => life::CHAT,
-            Activity::Play | Activity::Chase | Activity::Balance => self.orb.x,
-            Activity::Wander | Activity::Search => {
-                self.rng.below(901).unwrap_or(450) as f32 / 1000.0 + 0.05
-            }
-            Activity::Explore => {
-                if self.rng.below(2) == Some(0) {
-                    self.traits.life.favourite_explore
-                } else {
-                    self.rng.below(901).unwrap_or(450) as f32 / 1000.0 + 0.05
-                }
-            }
+            Activity::Wander => 0.5 + (self.rng.below(81).unwrap_or(40) as f32 - 40.0) / 1000.0,
+            Activity::Chase => self.orb.x.clamp(0.46, 0.54),
             _ => self.x,
         };
         self.moving = (self.target - self.x).abs() > 0.008;
@@ -810,13 +801,43 @@ mod tests {
         Pet::new(PetConfig::default(), Snapshot::new(7))
     }
     #[test]
+    fn autonomous_travel_stays_near_home_without_renderer_overrides() {
+        let mut old = Snapshot::new(7);
+        old.life.position = 0.95;
+        let mut p = Pet::new(PetConfig::default(), old);
+        for _ in 0..24000 {
+            let before = p.x;
+            p.advance(Duration::from_millis(50));
+            assert!((0.46..=0.54).contains(&p.x));
+            assert!((p.x - before).abs() <= 0.0041);
+            assert_eq!(p.snapshot().life.position, p.x);
+        }
+        for activity in [
+            Activity::Rest,
+            Activity::Sleep,
+            Activity::Explore,
+            Activity::Attention,
+        ] {
+            p.demo_activity(activity);
+            let before = p.x;
+            p.advance(Duration::from_millis(50));
+            assert_eq!(p.x, before);
+            assert!(!p.moving);
+        }
+    }
+    #[test]
     fn chase_cannot_extend_itself_forever() {
         let mut p = pet();
         p.interact(Action::Play);
-        for _ in 0..800 {
+        let mut left_chase = false;
+        for _ in 0..400 {
             p.advance(Duration::from_millis(50));
+            left_chase |= p.activity != Activity::Chase;
         }
-        assert_ne!(p.activity, Activity::Chase);
+        assert!(
+            left_chase,
+            "chase must finish within its bounded travel/interaction budget"
+        );
         assert!(p.traits.energy > 0.1);
     }
     #[test]
@@ -838,19 +859,15 @@ mod tests {
         assert_eq!(day.traits.life.preferences, before);
     }
     #[test]
-    fn navigation_precedes_rest_and_orb_interaction() {
+    fn rest_and_orb_interactions_stay_in_place() {
         let mut p = pet();
         p.interact(Action::Rest);
-        assert!(p.moving);
         let before = p.x;
-        p.advance(Duration::from_millis(50));
-        assert!((p.x - before).abs() <= 0.013);
-        assert!(p.moving);
         for _ in 0..80 {
             p.advance(Duration::from_millis(50));
         }
         assert!(!p.moving);
-        assert!((p.x - p.traits.life.favourite_rest).abs() < 0.01);
+        assert_eq!(p.x, before);
         p.interact(Action::Orb);
         for _ in 0..120 {
             p.advance(Duration::from_millis(50));

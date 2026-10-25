@@ -47,11 +47,7 @@ impl ClipId {
             return Self::Think;
         }
         if p.moving {
-            return if p.activity == Activity::Chase {
-                Self::Run
-            } else {
-                Self::Walk
-            };
+            return Self::Walk;
         }
         match p.activity {
             Activity::Sleep | Activity::Nap => Self::Sleep,
@@ -346,11 +342,11 @@ const PLAY: &[Frame] = &[
         1.,
         0.,
         1.,
-        [(10, 17), (20, 17)],
+        [(10, 21), (27, 22)],
         FEET,
         Some(MotionEvent::Catch),
     ),
-    f(220, SE, -1., 0., 1., [(10, 20), (20, 20)], FEET, None),
+    f(220, SE, -1., 0., 1., [(10, 22), (27, 22)], FEET, None),
     f(
         160,
         SX,
@@ -368,7 +364,7 @@ const PLAY: &[Frame] = &[
         1.,
         0.,
         1.,
-        [(10, 17), (20, 17)],
+        [(10, 21), (27, 22)],
         FEET,
         Some(MotionEvent::Catch),
     ),

@@ -4,8 +4,8 @@ from pathlib import Path
 import sys
 from PIL import Image, ImageDraw
 source=Path(sys.argv[1]);output=Path(sys.argv[2])
-names=['Idle','Walk','Run','Jump','Sit','Sleep','Wake','Play'];times=[0,240,520,800,1200,1800]
-sheet=Image.new('RGB',(6*160,8*116),'#0d1420');draw=ImageDraw.Draw(sheet)
+names=[name for name in ['Idle','Walk','Run','Curious','Bored','Jump','Sit','Sleep','Wake','Think','Talk','Play'] if (source/f'{name}-0.cells').exists()];times=[0,240,520,800,1200,1800]
+sheet=Image.new('RGB',(6*160,len(names)*116),'#0d1420');draw=ImageDraw.Draw(sheet)
 for row,name in enumerate(names):
     for col,ms in enumerate(times):
         lines=(source/f'{name}-{ms}.cells').read_text().splitlines()

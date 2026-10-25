@@ -162,7 +162,7 @@ impl Config {
         }
         if c.security.tools_enabled || c.security.mcp_enabled || c.security.shell_enabled {
             return Err(
-                "v0.4.2 supports chat only; all security enable flags must remain false".into(),
+                "v0.4.3 supports chat only; all security enable flags must remain false".into(),
             );
         }
         Ok(c)
