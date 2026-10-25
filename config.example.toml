@@ -1,0 +1,21 @@
+[agent]
+name = "Terry"
+
+[ollama]
+endpoint = "http://127.0.0.1:11434"
+model = "qwen3:8b"
+num_ctx = 8192
+num_predict = 2048
+# Total request deadline, including model loading and generation.
+timeout_seconds = 300
+
+[interface]
+theme = "dark" # dark or light
+show_terry = true
+animation = true
+animation_fps = 15
+
+[security]
+tools_enabled = false
+mcp_enabled = false
+shell_enabled = false

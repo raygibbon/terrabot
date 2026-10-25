@@ -1,0 +1,4 @@
+/target
+*.cast
+*.gif
+__pycache__/
