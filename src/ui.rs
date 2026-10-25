@@ -1,5 +1,5 @@
 use crate::{
-    animation::Terri,
+    animation::Trixie,
     config::Config,
     models, persistence,
     pet::{PetEvent, Snapshot},
@@ -229,7 +229,7 @@ pub struct Chat {
     config: Config,
     input: WindowId,
     transcript: WindowId,
-    terri: WindowId,
+    trixie: WindowId,
     header: WindowId,
     diagnostic: WindowId,
     models: Vec<models::Model>,
@@ -256,7 +256,7 @@ impl Chat {
             .widget_mut::<T>(id)
     }
     fn pet_event(&self, c: &mut Context<'_, ()>, event: PetEvent<'_>) {
-        if let Some(t) = self.widget::<Terri>(c, self.terri) {
+        if let Some(t) = self.widget::<Trixie>(c, self.trixie) {
             t.event(event);
         }
     }
@@ -278,7 +278,7 @@ impl Chat {
     }
     fn layout(&self, c: &mut Context<'_, ()>) {
         let size = c.size();
-        let show = self.config.interface.show_terri && size.width >= 52 && size.height >= 14;
+        let show = self.config.interface.show_trixie && size.width >= 52 && size.height >= 14;
         let panel = if size.width < 90 || size.height < 23 {
             20
         } else {
@@ -290,7 +290,7 @@ impl Chat {
                 (
                     Length::Fixed(panel),
                     if show {
-                        Layout::Window(self.terri)
+                        Layout::Window(self.trixie)
                     } else {
                         Layout::Hidden
                     },
@@ -319,15 +319,15 @@ impl Chat {
     fn schedule(&mut self, c: &mut Context<'_, ()>) {
         let size = c.size();
         let animated = self.config.interface.animation
-            && self.config.interface.show_terri
+            && self.config.interface.show_trixie
             && size.width >= 52
             && size.height >= 14;
         let healthy = self
-            .widget::<Terri>(c, self.terri)
+            .widget::<Trixie>(c, self.trixie)
             .is_some_and(|t| t.fault.is_none());
         let interval = if animated && healthy {
             let remaining = self
-                .widget::<Terri>(c, self.terri)
+                .widget::<Trixie>(c, self.trixie)
                 .map(|t| t.pet.remaining())
                 .unwrap_or(Duration::from_millis(50));
             self.clock
@@ -387,11 +387,11 @@ impl Chat {
             return;
         }
         let summary = self
-            .widget::<Terri>(c, self.terri)
+            .widget::<Trixie>(c, self.trixie)
             .map(|t| t.label())
             .unwrap_or_default();
         let names: Vec<String> = [
-            "Get Terri's attention",
+            "Get Trixie's attention",
             "Offer the orb",
             "Ask her to play",
             "Ask her to rest",
@@ -403,7 +403,7 @@ impl Chat {
         .iter()
         .map(|s| (*s).into())
         .collect();
-        let list = Panel::new(format!("Terri · {summary} · Enter / Esc"), names.clone());
+        let list = Panel::new(format!("Trixie · {summary} · Enter / Esc"), names.clone());
         self.picker = Some(c.desktop.show_modal(
             ModelPicker {
                 command: PET_CONTROL,
@@ -451,7 +451,7 @@ impl Chat {
                 self.worker = Some(w);
                 self.status(c, "Checking connection");
                 self.pet_event(c, PetEvent::Idle);
-                if let Some(t) = self.widget::<Terri>(c, self.terri) {
+                if let Some(t) = self.widget::<Trixie>(c, self.trixie) {
                     t.pet.traits.mood = crate::pet::Mood::Curious;
                 }
             }
@@ -555,7 +555,7 @@ impl Chat {
                         self.notice(c, if missing { format!("Configured model '{}' unavailable. Using {name}; F6 shows installed alternatives. Configuration preserved.", self.configured_model) } else { format!("Using {name}. F6 changes models.") });
                         self.status(c, "Connected");
                         self.pet_event(c, PetEvent::Idle);
-                        if let Some(t) = self.widget::<Terri>(c, self.terri) {
+                        if let Some(t) = self.widget::<Trixie>(c, self.trixie) {
                             t.pet.traits.mood = if missing {
                                 crate::pet::Mood::Confused
                             } else {
@@ -629,16 +629,16 @@ impl Chat {
         }
         let elapsed = now.saturating_duration_since(self.last_tick);
         self.last_tick = now;
-        if let Some(t) = self.widget::<Terri>(c, self.terri) {
+        if let Some(t) = self.widget::<Trixie>(c, self.trixie) {
             t.advance(elapsed);
         }
         if self.clock.poll(now).is_some()
             && self.config.interface.animation
-            && self.config.interface.show_terri
+            && self.config.interface.show_trixie
             && c.size().width >= 52
             && c.size().height >= 14
             && self
-                .widget::<Terri>(c, self.terri)
+                .widget::<Trixie>(c, self.trixie)
                 .is_some_and(|t| t.fault.is_none())
         {
             c.redraw();
@@ -658,7 +658,7 @@ impl App for Chat {
             } else {
                 crate::animation::Palette::TrueColor
             };
-            if let Some(t) = self.widget::<Terri>(c, self.terri) {
+            if let Some(t) = self.widget::<Trixie>(c, self.trixie) {
                 t.palette = palette;
             }
         }
@@ -687,7 +687,7 @@ impl App for Chat {
                     .and_then(|p| p.list.selected());
                 c.desktop.close_modal();
                 self.picker = None;
-                if let Some(t) = self.widget::<Terri>(c, self.terri) {
+                if let Some(t) = self.widget::<Trixie>(c, self.trixie) {
                     use crate::life::Action;
                     match selected {
                         Some(0) => t.pet.interact(Action::Attention),
@@ -768,7 +768,7 @@ impl App for Chat {
                         Key::Function(6) => self.picker(c),
                         Key::Function(9) => {
                             self.config.interface.animation = !self.config.interface.animation;
-                            if let Some(t) = self.widget::<Terri>(c, self.terri) {
+                            if let Some(t) = self.widget::<Trixie>(c, self.trixie) {
                                 t.animate = self.config.interface.animation;
                             }
                             self.schedule(c);
@@ -781,13 +781,13 @@ impl App for Chat {
                                 1.0
                             };
                             self.config.interface.animation_intensity = value;
-                            if let Some(t) = self.widget::<Terri>(c, self.terri) {
+                            if let Some(t) = self.widget::<Trixie>(c, self.trixie) {
                                 t.intensity = value;
                             }
                             c.redraw();
                         }
                         Key::Function(8) => {
-                            self.config.interface.show_terri = !self.config.interface.show_terri;
+                            self.config.interface.show_trixie = !self.config.interface.show_trixie;
                             self.layout(c);
                             self.schedule(c);
                         }
@@ -803,7 +803,7 @@ impl App for Chat {
         self.worker = None;
         self.cue_worker = None;
         if let Some(path) = &self.state_path
-            && let Some(t) = self.widget::<Terri>(c, self.terri)
+            && let Some(t) = self.widget::<Trixie>(c, self.trixie)
         {
             persistence::save(path, &t.pet.snapshot()).map_err(io::Error::other)?;
         }
@@ -853,7 +853,7 @@ pub fn run(config: Config) -> io::Result<()> {
         Some(Ok(s)) => s,
         Some(Err(e)) => {
             warning = Some(format!(
-                "Terri state could not be loaded: {e}. Existing file preserved; this session will not save."
+                "Trixie state could not be loaded: {e}. Existing file preserved; this session will not save."
             ));
             state_path = None;
             Snapshot::new(config.pet.seed)
@@ -861,7 +861,7 @@ pub fn run(config: Config) -> io::Result<()> {
         None => Snapshot::new(config.pet.seed),
     };
     snapshot.sessions = snapshot.sessions.saturating_add(1);
-    let mut character = Terri::new(config.pet.clone(), snapshot);
+    let mut character = Trixie::new(config.pet.clone(), snapshot);
     character.animate = config.interface.animation;
     character.intensity = config.interface.animation_intensity;
     character.palette = match config.interface.palette.as_str() {
@@ -869,7 +869,7 @@ pub fn run(config: Config) -> io::Result<()> {
         "ascii" => crate::animation::Palette::Ascii,
         _ => crate::animation::Palette::TrueColor,
     };
-    let terri = controls.add(character, false);
+    let trixie = controls.add(character, false);
     let mut transcript_widget = Transcript::new();
     transcript_widget.add("Welcome",format!("I'm {}. Let's make something useful.\nChat stays in memory and is sent only to your configured Ollama endpoint.\nType below; Enter sends, Escape cancels, Page Up/Down scrolls.",config.agent.name));
     if let Some(warning) = warning {
@@ -903,7 +903,7 @@ pub fn run(config: Config) -> io::Result<()> {
             config,
             input,
             transcript,
-            terri,
+            trixie,
             header,
             worker: None,
             history: vec![],
@@ -927,7 +927,7 @@ mod tests {
     fn input_focus_returns_after_tiny_resize() {
         let mut desktop = Desktop::default();
         let mut group = Group::default();
-        let label = group.add(Label("Terri".into()), false);
+        let label = group.add(Label("Trixie".into()), false);
         let input = group.add(
             Input {
                 editor: TextInput::new(""),

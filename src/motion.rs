@@ -127,7 +127,7 @@ const CR: Shape = Shape::Crouch;
 const RN: Shape = Shape::Run;
 const CU: Shape = Shape::Curl;
 const SX: Shape = Shape::Stretch;
-const DOWN: [(i32, i32); 2] = [(0, 19), (28, 19)];
+const DOWN: [(i32, i32); 2] = [(2, 19), (25, 19)];
 const UP: [(i32, i32); 2] = [(0, 8), (28, 7)];
 const FEET: [(i32, i32); 2] = [(7, 27), (20, 27)];
 const IDLE: &[Frame] = &[
@@ -313,10 +313,10 @@ const TALK: &[Frame] = &[
     f(260, ST, 0., 0., 1., DOWN, FEET, None),
 ];
 const HAPPY: &[Frame] = &[
-    f(160, SE, -1., 0., 1., DOWN, FEET, None),
-    f(240, ST, -2., 2., 1., UP, FEET, None),
-    f(160, ST, 0., 0., 0.98, DOWN, FEET, None),
-    f(240, ST, 2., 2., 1., UP, FEET, None),
+    f(240, CR, 0., 0., 1., DOWN, FEET, None),
+    f(240, ST, 0., 2., 1., UP, FEET, None),
+    f(220, CR, 0., 0., 1., DOWN, FEET, Some(MotionEvent::Land)),
+    f(1400, ST, 0., 0., 1., DOWN, FEET, None),
 ];
 const SAD: &[Frame] = &[
     f(1100, SE, -1.5, 0., 1., [(2, 24), (26, 24)], FEET, None),
@@ -337,7 +337,7 @@ const PLAY: &[Frame] = &[
     f(350, ST, 2., 0., 1., DOWN, FEET, None),
     f(320, SE, 3., 0., 1., [(10, 23), (20, 23)], FEET, None),
     f(
-        360,
+        600,
         ST,
         1.,
         0.,
@@ -368,7 +368,7 @@ const PLAY: &[Frame] = &[
         FEET,
         Some(MotionEvent::Catch),
     ),
-    f(300, ST, 0., 0., 1., DOWN, FEET, None),
+    f(1000, ST, 0., 0., 1., DOWN, FEET, None),
 ];
 const CELEBRATE: &[Frame] = &[
     JUMP[0],

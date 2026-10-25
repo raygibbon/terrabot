@@ -14,7 +14,7 @@ fn start() -> Result<(), Box<dyn std::error::Error>> {
         match arg.as_str() {
             "--help" | "-h" => {
                 println!(
-                    "Terrabot v0.2\nUsage: terrabot [--config PATH]\nDefault: ~/.config/terrabot/config.toml\nEnter send · Esc cancel · PgUp/PgDn scroll · F2/F3 resize Terri · F5 reconnect · F6 animation · F7 motion · F8 hide · Ctrl+C/Q quit"
+                    "Terrabot v0.4.4\nUsage: terrabot [--config PATH]\nDefault: ~/.config/terrabot/config.toml\nEnter send · Esc cancel · PgUp/PgDn scroll · F2/F3 resize Trixie · F4 pet · F5 reconnect · F6 models · F7 motion · F8 hide · Ctrl+C/Q quit"
                 );
                 return Ok(());
             }

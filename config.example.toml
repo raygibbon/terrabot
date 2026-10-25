@@ -1,5 +1,5 @@
 [agent]
-name = "Terri"
+name = "Trixie"
 
 [ollama]
 endpoint = "http://127.0.0.1:11434"
@@ -13,7 +13,7 @@ emotion_cues = false
 
 [interface]
 theme = "dark" # dark or light
-show_terri = true # legacy show_terry is accepted as an alias
+show_trixie = true # legacy show_terri and show_terry are accepted as aliases
 animation = true
 animation_fps = 20 # 1–60; see measured results in docs/performance.md
 animation_intensity = 1.0 # 0–1; lower values reduce movement

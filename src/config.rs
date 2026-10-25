@@ -18,7 +18,7 @@ pub struct Agent {
 impl Default for Agent {
     fn default() -> Self {
         Self {
-            name: "Terri".into(),
+            name: "Trixie".into(),
         }
     }
 }
@@ -48,8 +48,8 @@ impl Default for Ollama {
 #[serde(default, deny_unknown_fields)]
 pub struct Interface {
     pub theme: String,
-    #[serde(alias = "show_terry")]
-    pub show_terri: bool,
+    #[serde(alias = "show_terry", alias = "show_terri")]
+    pub show_trixie: bool,
     pub animation_intensity: f32,
     pub palette: String,
     pub animation: bool,
@@ -59,7 +59,7 @@ impl Default for Interface {
     fn default() -> Self {
         Self {
             theme: "dark".into(),
-            show_terri: true,
+            show_trixie: true,
             animation_intensity: 1.0,
             palette: "auto".into(),
             animation: true,
@@ -103,7 +103,10 @@ pub struct Security {
 }
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let c: Self = toml::from_str(text).map_err(|e| e.to_string())?;
+        let mut c: Self = toml::from_str(text).map_err(|e| e.to_string())?;
+        if matches!(c.agent.name.as_str(), "Terri" | "Terry") {
+            c.agent.name = "Trixie".into();
+        }
         if c.ollama.endpoint.len() > 2048 {
             return Err("endpoint exceeds 2048 bytes".into());
         }
@@ -162,7 +165,7 @@ impl Config {
         }
         if c.security.tools_enabled || c.security.mcp_enabled || c.security.shell_enabled {
             return Err(
-                "v0.4.3 supports chat only; all security enable flags must remain false".into(),
+                "v0.4.4 supports chat only; all security enable flags must remain false".into(),
             );
         }
         Ok(c)
@@ -188,6 +191,16 @@ mod tests {
     use super::*;
     #[test]
     fn defaults_and_partial() {
+        for key in ["show_terri", "show_terry", "show_trixie"] {
+            let c =
+                Config::parse(&format!("[agent]\nname='Terri'\n[interface]\n{key}=false")).unwrap();
+            assert_eq!(c.agent.name, "Trixie");
+            assert!(!c.interface.show_trixie);
+        }
+        assert_eq!(
+            Config::parse("[agent]\nname='Custom'").unwrap().agent.name,
+            "Custom"
+        );
         assert_eq!(Config::parse("").unwrap().ollama.model, "auto");
         assert_eq!(
             Config::parse("[interface]\nanimation=false")

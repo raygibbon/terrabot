@@ -1,7 +1,7 @@
-# Terrabot v0.4.3 — Terri
+# Terrabot v0.4.4 — Trixie
 
-Terri is a curious, technically capable AI companion who lives in your terminal.
-Her handcrafted lilac coat, mint orb, expressive eyes and tiny feet are drawn
+Trixie is a curious, technically capable AI companion who lives in your terminal.
+Her handcrafted lilac coat, bright turquoise orb, expressive eyes and rounded paws are drawn
 entirely with terminal cells. She explores, investigates, plays, rests and reacts
 to conversation while your local Ollama model supplies her replies.
 
@@ -33,11 +33,11 @@ asynchronously, reports failures in a replaceable status area, and refreshes dis
 download models. You can edit the next draft while a reply streams; Enter during
 generation leaves that draft intact.
 
-## Try Terri without Ollama
+## Try Trixie without Ollama
 
 ```bash
-cargo run --release --example terri-demo
-cargo run --release --example terri-demo -- --auto
+cargo run --release --example trixie-demo
+cargo run --release --example trixie-demo -- --auto
 ```
 
 | Demo key | Action |
@@ -73,12 +73,12 @@ Use `--manual` to pause autonomous selection, `--diagnostics` for the overlay, a
 | Backspace / Delete | Edit; bracketed paste is supported |
 | Page Up / Page Down | Scroll conversation |
 | Escape | Cancel the active request |
-| F2 / F3 | Resize Terri's panel on larger terminals |
+| F2 / F3 | Resize Trixie's panel on larger terminals |
 | F4 | Pet controls: attention, orb, play, rest, wake, inspect, autonomy, reset |
 | F5 | Recheck server and model |
 | F6 | Open model picker; arrows navigate, Enter selects, Escape closes |
 | F7 | Toggle normal / reduced motion |
-| F8 | Hide / show Terri |
+| F8 | Hide / show Trixie |
 | F9 | Toggle animation |
 | Ctrl+Q / Ctrl+C | Quit and restore terminal |
 
@@ -97,11 +97,12 @@ Defaults work without a file. Use `--config PATH` for another file. See the
 [complete example](config.example.toml) for model, context/output limits, frame
 rate, intensity, palette, persistence and behaviour weights. Unknown keys and
 invalid values are rejected before entering terminal mode. Execution enable flags
-must remain false. Existing `show_terry` settings remain valid; change an explicit
-old `agent.name = "Terry"` to `"Terri"` to adopt her new name.
+must remain false. `show_trixie` is the current visibility key; `show_terri` and
+`show_terry` remain aliases. Explicit old default names `Terri` and `Terry` are
+read as `Trixie`; other custom names are preserved.
 
 Traits, energy, mood, preferred activities, RNG state and interaction counters
-are saved on clean shutdown to `~/.local/state/terrabot/terri.json`, or beneath
+are saved on clean shutdown to `~/.local/state/terrabot/trixie.json`, or beneath
 `$XDG_STATE_HOME` when set to an absolute path. Writes use a versioned JSON format,
 a private temporary file and atomic replacement. Invalid or future-version files
 are preserved; that session runs without saving. No conversation text is stored
@@ -117,7 +118,7 @@ receives `num_ctx` and `num_predict`.
 
 ## Personality and optional AI cues
 
-A concise system profile makes Terri helpful, curious and thoughtful, without
+A concise system profile makes Trixie helpful, curious and thoughtful, without
 pretending she has human consciousness or narrating every movement. Local events
 control attention, thinking and speaking. Conservative text heuristics recognize
 success and distress; serious conversations suppress playful cues and celebration.
@@ -140,7 +141,7 @@ cargo test
 cargo build --release
 cargo build --release --examples
 python3 tests/pty_smoke.py
-cargo run --release --example terri-benchmark
+cargo run --release --example trixie-benchmark
 python3 tests/benchmark_terminal.py
 ```
 
@@ -157,9 +158,9 @@ Install [asciinema](https://docs.asciinema.org/manual/cli/quick-start/) and opti
 
 ```bash
 cargo build --release --examples
-asciinema rec -c './target/release/examples/terri-demo --auto' terri.cast
+asciinema rec -c './target/release/examples/trixie-demo --auto' trixie.cast
 # Quit with Q when finished.
-agg terri.cast terri.gif
+agg trixie.cast trixie.gif
 
 # Or record a real conversation:
 asciinema rec -c './target/release/terrabot' terrabot.cast
@@ -200,7 +201,7 @@ interrupted-stream states are reported separately. Esc cancels an active request
 
 ## Life in the habitat
 
-Terri now chooses activities from seven bounded needs: energy, boredom, curiosity,
+Trixie now chooses activities from seven bounded needs: energy, boredom, curiosity,
 playfulness, comfort, sociability and restfulness. Stable boldness, liveliness and
 social inclination influence utility scores. Preferences change a little after
 completed interactions; cooldowns, bounded travel and minimum durations prevent
@@ -236,7 +237,7 @@ Autonomy and overlay switches in F4 apply to the current session; config sets de
 For an accelerated, deterministic 24-hour life run without a terminal or Ollama:
 
 ```bash
-cargo run --release --example terri-life -- 86400 7
+cargo run --release --example trixie-life -- 86400 7
 ```
 
 It checks bounds every tick and reports time in each activity, transitions, longest
@@ -247,13 +248,13 @@ activity and final state as JSON. The injected day/night schedule starts at noon
 The presentation layer now has sixteen named, hand-authored clips: Idle, Walk,
 Run, Jump, Sit, Sleep, Wake, Think, Talk, Happy, Sad, Curious, Bored, Play,
 Celebrate and Stumble. Distinct standing, seated, curled and stretched artwork
-shares Terri's lilac shading, mint light, feet and facial proportions. Authored
+shares Trixie's lilac shading, mint light, feet and facial proportions. Authored
 foot and hand contacts, timed anticipation/recovery, independent face motion and
 small secondary effects replace the previous pose-only system.
 
 ```bash
-cargo run --release --example terri-demo -- --showcase
-cargo run --release --example terri-demo -- --clip Jump
+cargo run --release --example trixie-demo -- --showcase
+cargo run --release --example trixie-demo -- --clip Jump
 ```
 
 | Preview control | Action |
@@ -293,7 +294,7 @@ rendering backends are used.
 
 ## v0.4.2 pixel-art repair
 
-Terri now uses a fixed 36×36 logical canvas and authored standing, lowering,
+Trixie now uses a fixed 36×36 logical canvas and authored standing, lowering,
 seated, curled, stretched and forward-leaning run silhouettes. The old inverse
 sampling, vertical scaling, compensating width changes and shear are removed.
 Only the root translates during a jump. Shoulder/hip attachments keep limbs
@@ -315,9 +316,9 @@ updated. See [the repair review and actual terminal comparisons](docs/captures/v
 for captures, reproduction steps and measured validation results.
 
 
-## v0.4.3: Terri and the orb
+## v0.4.3: Trixie and the orb
 
-The scene is now Terri, her bright turquoise orb and a small ground shadow.
+The scene is now Trixie, her bright turquoise orb and a small ground shadow.
 Furniture, the full-width floor and idle ambient particles are gone. Eye shapes,
 expressions and gaze are preserved; the accidental mint eye pixels now use the
 existing light eye colour. Mint body accents remain below the face.
@@ -329,7 +330,7 @@ sequence after any shuffle. Needs, learned preferences and saved-state fields ar
 retained. Old saved positions are clamped into the home area on load. The renderer
 uses the simulation position directly, with no recurring position overrides.
 
-The orb floats beside Terri, moves lower during curiosity/boredom, pulses during
+The orb floats beside Trixie, moves lower during curiosity/boredom, pulses during
 thinking, flashes during celebration and dims/settles during sleep. Pickup uses
 an outer hand anchor, away from the face; tosses and returns retain bounded
 physics. Orb pixels and trails cannot overwrite the character. Hops use at most
@@ -340,3 +341,34 @@ retain the existing half-resolution mode.
 F4 interactions, F6 model selection, streaming, cues and persistence remain in
 place. [Visual review, terminal captures and validation](docs/captures/v043/README.md)
 include 60 accepted terminal-cell references for the ten requested activities.
+
+
+## v0.4.4: Trixie character polish
+
+Terrabot remains the app; Trixie is the character. The UI, default personality
+name, F4 menu and demo use the new name. `trixie-demo`, `trixie-benchmark` and
+`trixie-life` are the current example commands; the `terri-*` examples and public
+`Terri`/`default_terri` Rust aliases remain available.
+
+When `trixie.json` is absent, the app reads the sibling `terri.json`. Clean shutdown
+atomically saves the new filename and leaves the old file untouched as a backup.
+An existing new file takes precedence; unreadable or invalid state disables saving
+for that session, including invalid legacy state. No schema or personality fields
+were removed. Disabling persistence still disables state I/O.
+
+All embedded turquoise torso pixels are replaced with lilac shading in standing,
+lowering, seated, curled, stretched and moving artwork. Normal open eyes retain
+the exact geometry and highlights. Blink, sleep and relaxed happy lids are clean,
+continuous horizontal strokes. Shorter arms, rounded highlighted paws, thicker
+ankle connections and tucked rounded feet create a more cohesive silhouette.
+A single composed outer outline remains; body parts do not receive extra outlines.
+
+The Happy clip now has anticipation, one small bounce and a longer settle; orb play
+has a longer visible hold and recovery. The compact home area, minimal scene,
+bright orb, F4/F6 controls and chat behaviour remain in place. G now includes the
+local home offset and actual output scale alongside the existing anchor guides.
+
+[Reviewed terminal captures and validation](docs/captures/v044/README.md) include
+before/after frames and 72 accepted full-colour references. Earlier release
+sections above describe historical stages; this pass removes the remaining mint
+body markings that were deliberately retained in v0.4.3.

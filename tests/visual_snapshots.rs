@@ -1,7 +1,7 @@
 //! Full-colour terminal-cell references, sampled through the real TerraTUI Widget renderer.
 //! Candidate generation is explicit and never overwrites the checked-in references.
 use std::{collections::BTreeSet, fmt::Write, path::PathBuf, time::Duration};
-use terrabot::{animation::default_terri, motion::ClipId};
+use terrabot::{animation::default_trixie, motion::ClipId};
 use terrabox::{Color, Rect, Size, Style, Surface};
 use terratui::{Theme, Widget};
 fn rgb(color: Color) -> (u8, u8, u8) {
@@ -11,12 +11,12 @@ fn rgb(color: Color) -> (u8, u8, u8) {
     }
 }
 fn capture(id: ClipId, ms: u64) -> String {
-    let mut terri = default_terri();
-    terri.preview_clip(id);
+    let mut trixie = default_trixie();
+    trixie.preview_clip(id);
     let mut remaining = ms;
     while remaining > 0 {
         let step = remaining.min(20);
-        terri.advance(Duration::from_millis(step));
+        trixie.advance(Duration::from_millis(step));
         remaining -= step;
     }
     let mut surface = Surface::new(Size {
@@ -28,7 +28,7 @@ fn capture(id: ClipId, ms: u64) -> String {
         ..Theme::default()
     };
     surface.clear(theme.surface);
-    terri.draw(&mut surface.canvas(Rect::new(0, 0, 80, 26)), false, &theme);
+    trixie.draw(&mut surface.canvas(Rect::new(0, 0, 80, 26)), false, &theme);
     let mut pixels = Vec::new();
     // Exclude the changing textual status row; retain the entire character/habitat viewport.
     for y in 0..25 {
@@ -77,6 +77,8 @@ fn reviewed_terminal_cell_references() {
         ClipId::Sit,
         ClipId::Sleep,
         ClipId::Wake,
+        ClipId::Happy,
+        ClipId::Celebrate,
         ClipId::Play,
     ] {
         for ms in [0, 240, 520, 800, 1200, 1800] {
@@ -88,7 +90,7 @@ fn reviewed_terminal_cell_references() {
                 std::fs::write(dir.join(name), actual).unwrap();
             } else {
                 let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/visual/v043")
+                    .join("tests/visual/v044")
                     .join(&name);
                 let expected = std::fs::read_to_string(&path)
                     .unwrap_or_else(|_| panic!("missing reviewed reference {}", path.display()));

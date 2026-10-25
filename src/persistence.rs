@@ -11,12 +11,19 @@ pub fn default_path() -> Option<PathBuf> {
         .filter(|p| Path::new(p).is_absolute())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
-        .map(|p| p.join("terrabot/terri.json"))
+        .map(|p| p.join("terrabot/trixie.json"))
 }
 pub fn load(path: &Path, seed: u64) -> Result<Snapshot, String> {
     let file = match fs::File::open(path) {
         Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Snapshot::new(seed)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Read the old name only when the new file is absent. Clean shutdown
+            // writes trixie.json atomically; keep the legacy file as a backup.
+            if path.file_name().is_some_and(|n| n == "trixie.json") {
+                return load(&path.with_file_name("terri.json"), seed);
+            }
+            return Ok(Snapshot::new(seed));
+        }
         Err(e) => return Err(e.to_string()),
     };
     let mut bytes = Vec::new();
@@ -24,7 +31,7 @@ pub fn load(path: &Path, seed: u64) -> Result<Snapshot, String> {
         .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
     if bytes.len() as u64 > LIMIT {
-        return Err("Terri state exceeds 16 KiB".into());
+        return Err("Trixie state exceeds 16 KiB".into());
     }
     let mut value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     match value["version"].as_u64() {
@@ -40,7 +47,7 @@ pub fn load(path: &Path, seed: u64) -> Result<Snapshot, String> {
             );
         }
         Some(2) => {}
-        _ => return Err("Unsupported Terri state version".into()),
+        _ => return Err("Unsupported Trixie state version".into()),
     }
     let state: Snapshot = serde_json::from_value(value).map_err(|e| e.to_string())?;
     state.validate()?;
@@ -50,7 +57,7 @@ pub fn save(path: &Path, state: &Snapshot) -> Result<(), String> {
     state.validate()?;
     let parent = path.parent().ok_or("State path has no parent")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let temporary = parent.join(format!(".terri-{}.tmp", std::process::id()));
+    let temporary = parent.join(format!(".trixie-{}.tmp", std::process::id()));
     let bytes = serde_json::to_vec_pretty(state).map_err(|e| e.to_string())?;
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -80,6 +87,28 @@ pub fn save(path: &Path, state: &Snapshot) -> Result<(), String> {
 mod tests {
     use super::*;
     #[test]
+    fn character_rename_preserves_legacy_and_prefers_new_state() {
+        let dir = std::env::temp_dir().join(format!("trixie-rename-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let old = dir.join("terri.json");
+        let new = dir.join("trixie.json");
+        let mut state = Snapshot::new(42);
+        state.conversations = 73;
+        state.life.preferences[0] = 0.77;
+        save(&old, &state).unwrap();
+        let original = fs::read(&old).unwrap();
+        assert_eq!(load(&new, 99).unwrap(), state);
+        save(&new, &state).unwrap();
+        assert_eq!(fs::read(&old).unwrap(), original);
+        fs::write(&old, b"invalid legacy data").unwrap();
+        assert_eq!(load(&new, 0).unwrap(), state);
+        fs::remove_file(&new).unwrap();
+        assert!(load(&new, 0).is_err());
+        assert!(!new.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
     fn migrates_legacy_without_losing_metadata() {
         let path = std::env::temp_dir().join(format!("terrabot-migration-{}", std::process::id()));
         let mut legacy = serde_json::to_value(Snapshot::new(19)).unwrap();
@@ -101,7 +130,7 @@ mod tests {
     fn roundtrip_atomic_and_invalid_preserved() {
         let path = std::env::temp_dir()
             .join(format!("terrabot-state-{}", std::process::id()))
-            .join("terri.json");
+            .join("trixie.json");
         let _ = fs::remove_dir_all(path.parent().unwrap());
         let mut s = load(&path, 42).unwrap();
         s.conversations = 7;

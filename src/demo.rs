@@ -1,6 +1,6 @@
 //! Interactive character laboratory. No Ollama or personality-file access.
 use crate::{
-    animation::{Palette, Terri, validate_fps},
+    animation::{Palette, Trixie, validate_fps},
     config::PetConfig,
     motion::{ClipId, Expression},
     pet::{Activity, Mood, PetEvent, Snapshot},
@@ -45,7 +45,7 @@ impl App for Demo {
                 }
                 let elapsed = now - self.last;
                 self.last = now;
-                if let Some(t) = c.desktop.widget_mut::<Terri>(self.id) {
+                if let Some(t) = c.desktop.widget_mut::<Trixie>(self.id) {
                     if self.showcase && now >= self.next_showcase {
                         t.preview_clip(ClipId::ALL[self.clip_index % ClipId::ALL.len()]);
                         self.clip_index += 1;
@@ -59,15 +59,15 @@ impl App for Demo {
                 }
                 if self.clock.poll(now).is_some()
                     && c.desktop
-                        .widget_mut::<Terri>(self.id)
+                        .widget_mut::<Trixie>(self.id)
                         .is_some_and(|t| t.animate && !t.paused && t.fault.is_none())
                 {
                     self.frames += 1;
-                    if let Some(t) = c.desktop.widget_mut::<Terri>(self.id)
+                    if let Some(t) = c.desktop.widget_mut::<Trixie>(self.id)
                         && t.preview.is_some()
                     {
                         c.desktop.status.text = format!(
-                            " TERRI preview · {:.1} FPS · [/] clip · Space pause · . step · ,/; speed · X face · V facing · G guides · Enter replay · Z life · Q quit",
+                            " TRIXIE preview · {:.1} FPS · [/] clip · Space pause · . step · ,/; speed · X face · V facing · G guides · Enter replay · Z life · Q quit",
                             self.frames as f64 / self.start.elapsed().as_secs_f64().max(0.001)
                         );
                     }
@@ -91,7 +91,7 @@ impl App for Demo {
                     c.quit();
                     return Ok(());
                 }
-                if let Some(t) = c.desktop.widget_mut::<Terri>(self.id) {
+                if let Some(t) = c.desktop.widget_mut::<Trixie>(self.id) {
                     match k.key {
                         Key::Char('[' | ']') => {
                             self.showcase = false;
@@ -158,7 +158,7 @@ impl App for Demo {
                             t.pet.autonomous = self.auto;
                         }
                         Key::Char('r') => {
-                            *t = Terri::new(
+                            *t = Trixie::new(
                                 PetConfig {
                                     seed: self.seed,
                                     autonomous: self.auto,
@@ -255,7 +255,7 @@ pub fn run() -> io::Result<()> {
             "--ascii" => palette = Palette::Ascii,
             "--help" => {
                 println!(
-                    "Terri demo: --showcase --clip Jump --auto --manual --diagnostics --seed 7 --fps 20 --seconds 10 --indexed --ascii\nM mood · N next activity · B boredom · E lower energy · S sleep · W wake · F fake response · D denial · R reset · A autonomous · I diagnostics · O orb · C chase · H attention · U curiosity · L comfort · T day/night · P animation · +/- intensity · Q/Esc/Ctrl+C quit\nPreview: [/] clip · Space pause · . next frame · ,/; speed · X expression · V facing · G guides · Enter replay · Z life"
+                    "Trixie demo: --showcase --clip Jump --auto --manual --diagnostics --seed 7 --fps 20 --seconds 10 --indexed --ascii\nM mood · N next activity · B boredom · E lower energy · S sleep · W wake · F fake response · D denial · R reset · A autonomous · I diagnostics · O orb · C chase · H attention · U curiosity · L comfort · T day/night · P animation · +/- intensity · Q/Esc/Ctrl+C quit\nPreview: [/] clip · Space pause · . next frame · ,/; speed · X expression · V facing · G guides · Enter replay · Z life"
                 );
                 return Ok(());
             }
@@ -273,7 +273,7 @@ pub fn run() -> io::Result<()> {
         bar: surface,
         ..Theme::default()
     };
-    let mut terri = Terri::new(
+    let mut trixie = Trixie::new(
         PetConfig {
             seed,
             autonomous: auto,
@@ -282,13 +282,13 @@ pub fn run() -> io::Result<()> {
         },
         Snapshot::new(seed),
     );
-    terri.palette = palette;
+    trixie.palette = palette;
     if let Some(id) = selected_clip {
-        terri.preview_clip(id);
+        trixie.preview_clip(id);
     }
-    let id = desktop.add_window(terri);
+    let id = desktop.add_window(trixie);
     desktop.layout = Layout::Window(id);
-    desktop.status.text=" TERRI · M mood · N activity · B bored · E energy · S sleep · W wake · F speak · D denial · R reset · A auto · I inspect · O orb · C chase · P pause · +/- motion · Q quit".into();
+    desktop.status.text=" TRIXIE · M mood · N activity · B bored · E energy · S sleep · W wake · F speak · D denial · R reset · A auto · I inspect · O orb · C chase · P pause · +/- motion · Q quit".into();
     let metrics = std::rc::Rc::new(std::cell::Cell::new((0, Duration::ZERO)));
     let demo = Demo {
         id,
@@ -315,7 +315,7 @@ pub fn run() -> io::Result<()> {
     if seconds.is_some() {
         let (frames, elapsed) = metrics.get();
         println!(
-            "terri-demo: frames={frames} elapsed={:.3}s observed_fps={:.2} target_fps={fps}",
+            "trixie-demo: frames={frames} elapsed={:.3}s observed_fps={:.2} target_fps={fps}",
             elapsed.as_secs_f64(),
             frames as f64 / elapsed.as_secs_f64().max(0.001)
         );

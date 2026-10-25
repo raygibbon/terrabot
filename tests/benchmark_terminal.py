@@ -13,7 +13,7 @@ results = []
 for fps in (20, 30, 60):
     for sample in range(3):
         before = cpu()
-        t = Terminal("http://127.0.0.1:1", command=[str(ROOT / "target/release/examples/terri-demo"),
+        t = Terminal("http://127.0.0.1:1", command=[str(ROOT / "target/release/examples/trixie-demo"),
             "--auto", "--fps", str(fps), "--seconds", "4"])
         try:
             t.wait_for("observed_fps=", timeout=8)

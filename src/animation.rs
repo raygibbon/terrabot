@@ -10,7 +10,7 @@ use std::{io, time::Duration};
 use terrabox::{Canvas, Color, Style};
 use terratui::{Theme, Widget};
 
-// Original moon-moth creature: asymmetric mint feelers, lilac coat, peach cheeks.
+// Original moon-moth creature: lilac coat, rounded paws, pink cheeks.
 // Palette letters are pixels, not terminal glyphs. Spaces are transparent.
 const BODY: &[&str] = &[
     "       oo              oo",
@@ -34,9 +34,9 @@ const BODY: &[&str] = &[
     "   obccfffffffffffffccbbbo",
     "   oabccccffffffffccccbao",
     "    oabcccccccccccccbbao",
-    "     oabbbccceeecccbbbao",
-    "      oabbbceeeecbbbbao",
-    "       oabbbceecbbbbao",
+    "     oabbbcccccccccbbbao",
+    "      oabbbccccccbbbbao",
+    "       oabbbccccbbbbao",
     "        oabbbbbbbbao",
     "         ooooooooo",
 ];
@@ -271,7 +271,7 @@ pub enum OrbState {
     Bouncing,
     Returning,
 }
-pub struct Terri {
+pub struct Trixie {
     pub pet: Pet,
     pub intensity: f32,
     pub animate: bool,
@@ -305,7 +305,7 @@ pub struct Terri {
     trail_clock: f32,
     pub land_flash: f32,
 }
-impl Terri {
+impl Trixie {
     pub fn new(config: PetConfig, state: Snapshot) -> Self {
         let diagnostics = config.diagnostics;
         let mut pet = Pet::new(config, state);
@@ -621,9 +621,16 @@ impl Terri {
         {
             hands[1] = Point::new(31, 12);
         }
+        let model = art::model(frame.shape, BODY);
+        for (i, hand) in hands.iter_mut().enumerate() {
+            let shoulder = model.shoulders[i];
+            // Short soft arms: the endpoint stays within a small reach of its socket.
+            hand.x = hand.x.clamp(shoulder.x - 4, shoulder.x + 4);
+            hand.y = hand.y.clamp(shoulder.y - 8, shoulder.y + 6).min(28);
+        }
         let feet = frame
             .feet
-            .map(|(x, y)| Point::new((x + 5).clamp(7, 28), (y + 2).min(29)));
+            .map(|(x, y)| Point::new((x + 5).clamp(11, 25), (y + 2).min(28)));
         (hands, feet)
     }
     fn orb_anchor(&self) -> Point {
@@ -670,14 +677,16 @@ impl Terri {
         // Back limbs attach to the same model anchors. Torso covers shoulder/hip seams.
         for i in 0..2 {
             body.limb(model.shoulders[i], hands[i], 2);
-            body.limb(model.hips[i], feet[i], 1);
-            body.oval(feet[i], 3, 1, ink('b').unwrap());
+            body.limb(model.hips[i], feet[i], 2);
+            body.oval(feet[i], 3, 2, ink('b').unwrap());
+            body.line(feet[i].x - 1, feet[i].y - 1, 3, ink('c').unwrap());
         }
         body.art(model.art, model.offset.x, model.offset.y);
         // Foreground hands use lilac separation, not independently black outlines.
         for hand in hands {
             body.oval(hand, 2, 2, ink('c').unwrap());
-            body.put(hand.x - 1, hand.y - 1, ink('d').unwrap());
+            // A broad mitten highlight reads as one rounded paw, not a stray speck.
+            body.line(hand.x - 1, hand.y, 2, ink('d').unwrap());
         }
         let eye = Color::Rgb(46, 55, 85);
         let light = Color::Rgb(251, 248, 255);
@@ -690,13 +699,8 @@ impl Terri {
             let closed = sleep
                 || (self.animate && self.face.blink())
                 || (expression == Expression::Wink && i == 1);
-            if closed {
+            if closed || expression == Expression::Happy {
                 body.line(cx, cy + 2, 4, eye);
-                body.put(cx + 4, cy + 1, eye);
-            } else if expression == Expression::Happy {
-                body.line(cx + 1, cy, 2, eye);
-                body.put(cx, cy + 1, eye);
-                body.put(cx + 3, cy + 1, eye);
             } else {
                 let tall = match expression {
                     Expression::Surprised => 6,
@@ -914,10 +918,10 @@ impl Terri {
         Ok(world)
     }
 }
-impl Widget for Terri {
+impl Widget for Trixie {
     fn draw(&mut self, c: &mut Canvas<'_>, _: bool, theme: &Theme) {
         if let Some(error) = &self.fault {
-            c.put_str(1, 1, &format!("Terri paused: {error}"), theme.focused);
+            c.put_str(1, 1, &format!("Trixie paused: {error}"), theme.focused);
             return;
         }
         let size = c.size();
@@ -945,10 +949,11 @@ impl Widget for Terri {
                         0,
                         0,
                         &format!(
-                            "{:?} #{} v={:.3}/s scale=1:1",
+                            "{:?} #{} v={:.3}/s home={:+.2} scale=1:{scale}",
                             self.timeline.id,
                             self.timeline.index + 1,
-                            self.velocity
+                            self.velocity,
+                            self.visual_x - 0.5
                         ),
                         theme.bar,
                     );
@@ -982,15 +987,20 @@ impl Widget for Terri {
             }
             Err(error) => {
                 self.fault = Some(error.into());
-                c.put_str(1, 1, "Terri paused · chat remains available", theme.focused);
+                c.put_str(
+                    1,
+                    1,
+                    "Trixie paused · chat remains available",
+                    theme.focused,
+                );
             }
         }
     }
 }
-pub fn default_terri() -> Terri {
+pub fn default_trixie() -> Trixie {
     let config = PetConfig::default();
     let state = Snapshot::new(config.seed);
-    Terri::new(config, state)
+    Trixie::new(config, state)
 }
 pub fn validate_fps(fps: u32) -> io::Result<Duration> {
     if !(1..=60).contains(&fps) {
@@ -998,13 +1008,67 @@ pub fn validate_fps(fps: u32) -> io::Result<Duration> {
     }
     Ok(Duration::from_secs_f64(1.0 / f64::from(fps)))
 }
+/// Compatibility names for pre-0.4.4 callers.
+pub type Terri = Trixie;
+pub use default_trixie as default_terri;
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use terrabox::{Rect, Size, Surface};
     #[test]
+    fn body_palette_and_original_open_eyes_are_preserved() {
+        let mut t = default_trixie();
+        t.animate = false;
+        for id in ClipId::ALL {
+            t.preview_clip(id);
+            for (index, frame) in crate::motion::clip(id).frames.iter().enumerate() {
+                t.timeline.index = index;
+                let body = t.body(*frame, index).unwrap();
+                for pixel in body.pixels.iter().flatten() {
+                    if let Color::Rgb(r, g, b) = *pixel {
+                        assert!(
+                            !(u16::from(g) > u16::from(r) + 20 && u16::from(b) > u16::from(r) + 20),
+                            "turquoise body patch in {id:?}/{index}"
+                        );
+                    }
+                }
+            }
+        }
+        t.preview_clip(ClipId::Idle);
+        t.face.expression = Expression::Neutral;
+        t.face.gaze = 0.0;
+        let frame = t.timeline.frame();
+        let body = t.body(frame, 0).unwrap();
+        for anchor in art::model(frame.shape, BODY).eyes {
+            for y in 0..5 {
+                for x in 0..4 {
+                    let highlight = (x == 1 && y < 2) || (x == 2 && y == 4);
+                    assert_eq!(
+                        body.get((anchor.x + x) as usize, (anchor.y + y) as usize),
+                        Some(if highlight {
+                            Color::Rgb(251, 248, 255)
+                        } else {
+                            Color::Rgb(46, 55, 85)
+                        })
+                    );
+                }
+            }
+        }
+        t.face.expression = Expression::Happy;
+        let body = t.body(frame, 0).unwrap();
+        for anchor in art::model(frame.shape, BODY).eyes {
+            for x in 0..4 {
+                assert_eq!(
+                    body.get((anchor.x + x) as usize, (anchor.y + 2) as usize),
+                    Some(Color::Rgb(46, 55, 85))
+                );
+            }
+        }
+    }
+    #[test]
     fn eye_palette_and_composition_do_not_leak_turquoise() {
-        let mut t = default_terri();
+        let mut t = default_trixie();
         for id in ClipId::ALL {
             t.preview_clip(id);
             for index in 0..crate::motion::clip(id).frames.len() {
@@ -1053,7 +1117,7 @@ mod tests {
     }
     #[test]
     fn completed_character_is_connected_and_outlined() {
-        let t = default_terri();
+        let t = default_trixie();
         for id in ClipId::ALL {
             for (index, frame) in crate::motion::clip(id).frames.iter().enumerate() {
                 let body = t.body(*frame, index).unwrap();
@@ -1104,7 +1168,7 @@ mod tests {
     }
     #[test]
     fn faces_layers_and_rendering_are_repeatable() {
-        let mut t = default_terri();
+        let mut t = default_trixie();
         for id in ClipId::ALL {
             t.preview_clip(id);
             for expression in Expression::ALL {
@@ -1126,7 +1190,7 @@ mod tests {
     #[test]
     fn orb_attachment_and_release_are_continuous_in_both_directions() {
         for facing in [-1.0, 1.0] {
-            let mut t = default_terri();
+            let mut t = default_trixie();
             t.preview_clip(ClipId::Play);
             t.facing_override = Some(facing);
             let mut previous = t.orb_position(110, 45);
@@ -1167,7 +1231,7 @@ mod tests {
     }
     #[test]
     fn reduced_motion_pause_and_orb_contacts() {
-        let mut t = default_terri();
+        let mut t = default_trixie();
         t.intensity = 0.0;
         t.preview_clip(ClipId::Jump);
         for _ in 0..20 {
@@ -1197,7 +1261,7 @@ mod tests {
     }
     #[test]
     fn authored_silhouettes_and_walk_contacts_differ() {
-        let mut t = default_terri();
+        let mut t = default_trixie();
         let mut images = Vec::new();
         for id in [ClipId::Idle, ClipId::Sit, ClipId::Sleep] {
             t.preview_clip(id);
@@ -1224,7 +1288,7 @@ mod tests {
     #[test]
     fn artwork_bounds_and_no_simulation_in_render() {
         assert!(BODY.iter().all(|r| r.len() <= 32));
-        let mut t = default_terri();
+        let mut t = default_trixie();
         for a in Activity::ALL {
             t.pet.demo_activity(a);
             let snapshot = t.pet.snapshot();
@@ -1244,7 +1308,7 @@ mod tests {
     }
     #[test]
     fn clipped_canvas_never_touches_chat() {
-        let mut t = default_terri();
+        let mut t = default_trixie();
         let mut s = Surface::new(Size {
             width: 80,
             height: 30,
@@ -1260,7 +1324,7 @@ mod tests {
     }
     #[test]
     fn smooth_transition_and_fault_is_local() {
-        let mut t = default_terri();
+        let mut t = default_trixie();
         t.pet.x = t.pet.traits.life.favourite_rest;
         t.pet.demo_activity(Activity::Sleep);
         t.advance(Duration::from_millis(50));

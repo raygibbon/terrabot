@@ -121,7 +121,7 @@ class Terminal:
             self.process.wait()
             os.close(self.master)
             os.close(self.slave)
-            state = Path(self.directory.name) / "terrabot/terri.json"
+            state = Path(self.directory.name) / "terrabot/trixie.json"
             self.saved_state = json.loads(state.read_text()) if state.exists() else None
             self.directory.cleanup()
 
@@ -193,7 +193,7 @@ class Smoke(unittest.TestCase):
         t = Terminal(self.endpoint, cues=True)
         try:
             t.wait_for("Connected")
-            t.send("hello Terri\r")
+            t.send("hello Trixie\r")
             t.wait_for("streamed reply.")
             t.wait_for("Curious")
             self.assertEqual(len(self.server.requests), 2)
@@ -208,12 +208,12 @@ class Smoke(unittest.TestCase):
             t.close()
         self.assertEqual(t.saved_state["version"], 2)
         self.assertGreaterEqual(t.saved_state["conversations"], 1)
-        self.assertNotIn("hello Terri", json.dumps(t.saved_state))
+        self.assertNotIn("hello Trixie", json.dumps(t.saved_state))
 
     def test_demo_controls_resize_and_restoration(self):
         t = Terminal(self.endpoint, command=[str(ROOT / "target/release/examples/terri-demo")])
         try:
-            t.wait_for("TERRI")
+            t.wait_for("TRIXIE")
             t.send("s")
             t.wait_for("Resting")
             t.send("w")

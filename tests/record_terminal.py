@@ -15,7 +15,7 @@ class Recording(Terminal):
         self.record = Path(path).open('w')
         self.decoder = codecs.getincrementaldecoder('utf-8')('replace')
         self.record.write(json.dumps({'version': 2, 'width': 110, 'height': 30,
-            'title': 'Terri — actual terminal output', 'env': {'TERM': 'xterm-256color'}}) + '\n')
+            'title': 'Trixie — actual terminal output', 'env': {'TERM': 'xterm-256color'}}) + '\n')
         super().__init__('http://127.0.0.1:1', command=command)
     def pump(self, duration=0.1):
         until = time.monotonic() + duration
@@ -45,7 +45,7 @@ if __name__ == '__main__':
         end = time.monotonic() + float(seconds)
         while time.monotonic() < end and t.process.poll() is None:
             t.pump()
-        assert b'Terri paused' not in t.output, 'rendering fault'
+        assert b'Trixie paused' not in t.output, 'rendering fault'
     finally:
         t.finish()
     print(f'Recorded {path}; terminal restoration verified')

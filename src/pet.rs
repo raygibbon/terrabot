@@ -170,7 +170,7 @@ impl Snapshot {
     }
     pub fn validate(&self) -> Result<(), String> {
         if self.version != 2 {
-            return Err(format!("Unsupported Terri state version {}", self.version));
+            return Err(format!("Unsupported Trixie state version {}", self.version));
         }
         if !self.life.validate() {
             return Err("Invalid life state".into());
@@ -185,7 +185,7 @@ impl Snapshot {
         .iter()
         .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
         {
-            return Err("Terri traits must be finite numbers in 0–1".into());
+            return Err("Trixie traits must be finite numbers in 0–1".into());
         }
         Ok(())
     }
@@ -657,7 +657,7 @@ impl Pet {
                 self.gesture = Gesture::None;
                 self.success_context = success(text);
                 if !self.gentle
-                    && ["hello", "hi terri"]
+                    && ["hello", "hi trixie"]
                         .iter()
                         .any(|s| text.to_lowercase().contains(s))
                 {
