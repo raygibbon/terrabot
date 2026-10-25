@@ -111,3 +111,27 @@ local clock adapter is Unix-specific; other platforms use a neutral time bias.
 A 90-second real-terminal autonomous demo (`--auto --diagnostics --seed 7`) also
 completed without a rendering fault, restoring terminal attributes and the alternate
 screen. Terrabox and TerraGame remained unchanged. No commits or pushes were made.
+
+## Terri v0.4 animation overhaul — 2026-10-25
+
+Passed: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test` (38 unit tests), `cargo build --release`,
+`cargo build --release --examples`, and `python3 tests/pty_smoke.py` (13 tests).
+New coverage includes exact frame boundaries and fractional-time accumulation,
+ping-pong and introductory loops, one-shot completion, interruption priority,
+bounded events, authored contact/silhouette differences, all face/body combinations,
+orb catches/releases, reduced motion, pause and repeatable layered composition.
+The preview PTY test exercises stepping, speed, expression, facing, guides, resize
+and return to life; all prior chat, model discovery, cancellation and persistence
+checks continue to pass.
+
+A rendered contact-sheet inspection of all sixteen clips caught an undesirable
+speckled blend during development. The final transition uses grounded extent
+interpolation instead. Real PTY recordings were then captured: twelve seconds of
+the staged v0.3 baseline and sixty-five seconds of the full v0.4 showcase. Both
+restored terminal attributes and the alternate screen. See `docs/captures/README.md`.
+The final cue/gaze refinements were validated with the unit and PTY suites.
+
+The implementation preserves the v0.3 life/persistence schema and Ollama transport.
+No framework changes, commits or pushes were made. Rendering quality remains
+terminal/font dependent; palette and compact-layout fallbacks remain supported.

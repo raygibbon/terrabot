@@ -2,7 +2,8 @@
 use crate::{
     config::PetConfig,
     cues::Gesture,
-    pet::{Activity, Mood, Pet, PetEvent, Snapshot},
+    motion::{ClipId, Expression, Face, MotionEvent, Shape, Timeline},
+    pet::{Activity, Pet, PetEvent, Snapshot},
 };
 use std::{io, time::Duration};
 use terrabox::{Canvas, Color, Style};
@@ -200,62 +201,14 @@ impl Default for Pose {
     }
 }
 impl Pose {
-    fn target(p: &Pet, intensity: f32) -> Self {
-        let t = p.phase;
+    fn target(frame: crate::motion::Frame, time: f32, intensity: f32) -> Self {
         let amount = intensity.clamp(0.0, 1.0);
-        let mut pose = Self {
-            squash: 1.0 + (t * 2.0).sin() * 0.015 * amount,
-            ..Self::default()
-        };
-        match p.activity {
-            Activity::Wander | Activity::Explore | Activity::Search => {
-                pose.lift = (t * 8.0).sin().abs() * 0.8 * amount;
-                pose.lean = p.facing * 0.5 * amount;
-            }
-            Activity::Sit | Activity::Rest => pose.squash = 0.9,
-            Activity::Sleep | Activity::Nap => {
-                pose.squash = 0.65 + (t * 1.3).sin() * 0.02 * amount;
-                pose.lean = 1.0;
-            }
-            Activity::Wake => {
-                pose.squash = 1.08;
-                pose.arm = 1.0;
-            }
-            Activity::Play | Activity::Chase | Activity::Balance => {
-                pose.lean = (t * 3.0).sin() * 1.5 * amount;
-                pose.arm = 1.0;
-            }
-            Activity::Investigate => pose.lean = 2.0 * amount,
-            Activity::Dance | Activity::Celebrate => {
-                pose.lift = (t * 6.0).sin().max(0.0) * 3.5 * amount;
-                pose.squash = 1.0 - (t * 6.0).cos() * 0.06 * amount;
-                pose.lean = (t * 3.0).sin() * 2.0 * amount;
-                pose.arm = 1.0;
-            }
-            Activity::Stumble => {
-                pose.lean = (p.age * 3.0).sin() * 5.0 * amount;
-                pose.squash = 0.82;
-            }
-            Activity::Watch | Activity::Attention => {
-                pose.lean = 0.5 * amount;
-            }
+        Self {
+            squash: 1.0 + (frame.squash - 1.0) * amount + (time * 2.0).sin() * 0.008 * amount,
+            lean: frame.lean * amount,
+            lift: frame.lift * amount,
+            arm: 0.0,
         }
-        if p.moving {
-            pose.squash = 1.0;
-            pose.lift = (t * 9.0).sin().abs() * amount;
-            pose.lean = p.facing * amount;
-            pose.arm = 0.0;
-        }
-        if p.gesture == Gesture::HeadTilt {
-            pose.lean += 2.0 * p.cue_intensity * amount;
-        }
-        if p.gesture == Gesture::Nod {
-            pose.squash += (t * 5.0).sin() * 0.04 * p.cue_intensity * amount;
-        }
-        if p.gesture == Gesture::Wave {
-            pose.arm = 1.0;
-        }
-        pose
     }
     fn approach(&mut self, target: Self, seconds: f32) {
         let a = 1.0 - (-seconds.min(1.0) * 9.0).exp();
@@ -274,6 +227,24 @@ pub struct Terri {
     pose: Pose,
     pub diagnostics: bool,
     next_clock: std::time::Instant,
+    pub timeline: Timeline,
+    pub face: Face,
+    pub preview: Option<ClipId>,
+    pub paused: bool,
+    pub speed: f32,
+    pub guides: bool,
+    pub facing_override: Option<f32>,
+    pub visual_x: f32,
+    orb_x: f32,
+    orb_height: f32,
+    orb_velocity: f32,
+    orb_held: bool,
+    transition: f32,
+    previous_frame: crate::motion::Frame,
+    previous_index: usize,
+    trail: [(f32, f32); 6],
+    trail_clock: f32,
+    pub land_flash: f32,
 }
 impl Terri {
     pub fn new(config: PetConfig, state: Snapshot) -> Self {
@@ -281,6 +252,24 @@ impl Terri {
         let mut pet = Pet::new(config, state);
         pet.set_hour(crate::life::local_hour());
         Self {
+            visual_x: pet.x,
+            orb_x: pet.orb.x,
+            orb_height: pet.orb.height,
+            orb_velocity: 0.0,
+            orb_held: false,
+            timeline: Timeline::default(),
+            face: Face::default(),
+            preview: None,
+            paused: false,
+            speed: 1.0,
+            guides: false,
+            facing_override: None,
+            transition: 1.0,
+            previous_frame: crate::motion::clip(ClipId::Idle).frames[0],
+            previous_index: 0,
+            trail: [(pet.orb.x, pet.orb.height); 6],
+            trail_clock: 0.0,
+            land_flash: 0.0,
             pet,
             diagnostics,
             next_clock: std::time::Instant::now() + Duration::from_secs(60),
@@ -296,17 +285,142 @@ impl Terri {
             self.pet.set_hour(crate::life::local_hour());
             self.next_clock = std::time::Instant::now() + Duration::from_secs(60);
         }
-        self.pet.advance(elapsed);
-        let target = Pose::target(&self.pet, if self.animate { self.intensity } else { 0.0 });
-        self.pose.approach(target, elapsed.as_secs_f32());
+        if !self.paused {
+            if self.preview.is_none() {
+                self.pet.advance(elapsed);
+            }
+            self.advance_presentation(elapsed.mul_f32(self.speed.clamp(0.1, 3.0)));
+        }
     }
     pub fn event(&mut self, event: PetEvent<'_>) {
         self.pet.event(event);
         if !self.animate {
-            self.pose = Pose::target(&self.pet, 0.0);
+            self.timeline.request(ClipId::for_pet(&self.pet), true);
+            self.pose = Pose::target(self.timeline.frame(), 0.0, 0.0);
+        }
+    }
+    pub fn preview_clip(&mut self, id: ClipId) {
+        self.preview = Some(id);
+        self.previous_frame = self.timeline.frame();
+        self.previous_index = self.timeline.index;
+        self.timeline = Timeline::default();
+        self.timeline.request(id, true);
+        self.transition = 0.0;
+        self.orb_held = false;
+    }
+    pub fn step_frame(&mut self) {
+        self.previous_frame = self.timeline.frame();
+        self.previous_index = self.timeline.index;
+        self.timeline.step_frame();
+        self.transition = 0.0;
+        self.update_pose(0.05);
+    }
+    fn advance_presentation(&mut self, elapsed: Duration) {
+        let old_id = self.timeline.id;
+        let old_index = self.timeline.index;
+        let old_frame = self.timeline.frame();
+        let wanted = self.preview.unwrap_or_else(|| ClipId::for_pet(&self.pet));
+        if self.timeline.request(wanted, false) {
+            self.transition = 0.0;
+            self.orb_held = false;
+        }
+        if self.animate {
+            self.timeline.advance(elapsed);
+        }
+        if old_id != self.timeline.id || old_index != self.timeline.index {
+            self.previous_frame = old_frame;
+            self.previous_index = old_index;
+            self.transition = 0.0;
+        }
+        self.update_pose(elapsed.as_secs_f32().min(1.0));
+    }
+    fn update_pose(&mut self, dt: f32) {
+        let amount = if self.animate { self.intensity } else { 0.0 };
+        for event in self.timeline.drain_events() {
+            match event {
+                MotionEvent::Catch => self.orb_held = true,
+                MotionEvent::Release => {
+                    self.orb_held = false;
+                    self.orb_velocity = 29.0;
+                }
+                MotionEvent::Land | MotionEvent::Step => self.land_flash = 1.0,
+                _ => {}
+            }
+        }
+        if self.timeline.id == ClipId::Play && self.timeline.index == 7 {
+            self.orb_held = false;
+        }
+        self.transition = (self.transition + dt * 12.5).min(1.0);
+        let mut target = Pose::target(
+            self.timeline.frame(),
+            self.timeline.total_ms as f32 / 1000.0,
+            amount,
+        );
+        if !self.pet.thinking && !self.pet.speaking && !self.pet.gentle {
+            match self.pet.gesture {
+                Gesture::HeadTilt => target.lean += 2.0 * amount,
+                Gesture::Nod => target.squash += (self.face.clock * 5.0).sin() * 0.025 * amount,
+                _ => {}
+            }
+        }
+        self.pose.approach(target, dt);
+        self.face.advance(
+            &self.pet,
+            self.timeline.id,
+            if self.animate { dt } else { 0.0 },
+        );
+        self.visual_x += (self.pet.x - self.visual_x) * (dt * 20.0).min(1.0);
+        self.land_flash = (self.land_flash - dt * 4.0).max(0.0);
+        let frame = self.timeline.frame();
+        let hand_y = (frame.arms[0].1 + frame.arms[1].1) as f32 / 2.0;
+        let (x, height) = if self.orb_held {
+            (
+                self.visual_x,
+                (30.0 - hand_y) * self.pose.squash + self.pose.lift + 3.0,
+            )
+        } else if self.timeline.id == ClipId::Play {
+            (self.visual_x, 3.0)
+        } else if self.timeline.id == ClipId::Think {
+            (
+                self.visual_x + 0.16,
+                32.0 + (self.face.clock * 2.0).sin() * 1.5 * amount,
+            )
+        } else {
+            (self.pet.orb.x, self.pet.orb.height)
+        };
+        let a = 1.0 - (-dt * 12.0).exp();
+        self.orb_x += (x.clamp(0.0, 1.0) - self.orb_x) * a;
+        if self.timeline.id == ClipId::Play
+            && (self.timeline.index == 4 || self.timeline.index == 5)
+            && !self.orb_held
+        {
+            self.orb_velocity -= 40.0 * dt;
+            self.orb_height = (self.orb_height + self.orb_velocity * dt).max(3.0);
+        } else {
+            self.orb_height += (height - self.orb_height) * a;
+        }
+        self.orb_height = self.orb_height.clamp(3.0, 40.0);
+        if !self.pet.thinking && !self.pet.speaking {
+            let target = ((self.orb_x - self.visual_x) * 4.0).clamp(-1.0, 1.0);
+            self.face.gaze += (target - self.face.gaze) * (dt * 8.0).min(1.0);
+        }
+        self.trail_clock += dt;
+        if self.trail_clock >= 0.05 {
+            self.trail_clock %= 0.05;
+            self.trail.rotate_right(1);
+            self.trail[0] = (self.orb_x, self.orb_height);
         }
     }
     pub fn label(&self) -> String {
+        if let Some(id) = self.preview {
+            return format!(
+                "{id:?} · frame {} · {}ms · {:.1}x{}",
+                self.timeline.index + 1,
+                self.timeline.elapsed_ms,
+                self.speed,
+                if self.paused { " · paused" } else { "" }
+            );
+        }
         if self.pet.denied {
             "Policy denied · no action taken".into()
         } else if self.pet.thinking {
@@ -342,6 +456,109 @@ impl Terri {
             format!("        {:?} {:.1}", scores[1].0, scores[1].1),
         ]
     }
+    fn body(&self, frame: crate::motion::Frame, foot_index: usize) -> Result<Sprite, &'static str> {
+        let glow = Color::Rgb(105, 223, 206);
+        let mut body = Sprite::new(32, 32).ok_or("Invalid sprite bounds")?;
+        let (art, art_y, face_y) = match frame.shape {
+            Shape::Stand => (BODY, 1, 12),
+            Shape::Seat => (crate::art::SEATED, 7, 16),
+            Shape::Curl => (crate::art::CURLED, 12, 18),
+            Shape::Stretch => (crate::art::STRETCHED, 0, 10),
+        };
+        body.art(art, 1, art_y);
+        for (i, (x, y)) in frame.feet.iter().enumerate() {
+            body.art(FEET[(foot_index + i * 2) % FEET.len()], *x, *y);
+        }
+        let mut arms = frame.arms;
+        if self.pet.gesture == Gesture::Wave
+            && !self.pet.thinking
+            && !self.pet.speaking
+            && !self.pet.gentle
+        {
+            arms[1] = (
+                28,
+                8 + if self.animate {
+                    (self.face.clock * 5.0).sin().round() as i32
+                } else {
+                    0
+                },
+            );
+        }
+        for (i, (x, y)) in arms.iter().enumerate() {
+            body.art(HANDS[if *y < 15 { 1 + i % 2 } else { 0 }], *x, *y);
+        }
+        let eye = Color::Rgb(46, 55, 85);
+        let light = Color::Rgb(251, 248, 255);
+        let sleep = self.timeline.id == ClipId::Sleep && self.timeline.index >= 2;
+        let expression = self.face.expression;
+        let facing = self.facing_override.unwrap_or(self.pet.facing);
+        for (i, cx) in [10, 20].into_iter().enumerate() {
+            let cy = face_y
+                + if expression == Expression::Curious && i == 1 {
+                    1
+                } else {
+                    0
+                };
+            let closed = sleep
+                || (self.animate && self.face.blink())
+                || (expression == Expression::Wink && i == 1);
+            if closed {
+                body.line(cx, cy + 2, 4, eye);
+                body.put(cx + 4, cy + 1, eye);
+            } else if expression == Expression::Happy {
+                body.line(cx + 1, cy, 2, eye);
+                body.put(cx, cy + 1, eye);
+                body.put(cx + 3, cy + 1, eye);
+            } else {
+                let tall = match expression {
+                    Expression::Surprised => 6,
+                    Expression::Squint | Expression::Sad => 3,
+                    Expression::Sleepy => 2,
+                    _ => 5,
+                };
+                for y in 0..tall {
+                    body.line(cx, cy + y, 4, eye);
+                }
+                let gaze = (self.face.gaze * facing).round() as i32;
+                body.put(cx + 1 + gaze, cy, light);
+                body.put(cx + 1 + gaze, cy + 1, light);
+                body.put(cx + 2, cy + tall - 1, glow);
+                if expression == Expression::Sad {
+                    body.put(cx + if i == 0 { 3 } else { 0 }, cy - 2, eye);
+                }
+                if matches!(expression, Expression::Curious | Expression::Squint) {
+                    body.line(cx, cy - 2, 2, eye);
+                }
+            }
+        }
+        let mouth_y = face_y + 7;
+        if (expression == Expression::Talk && (self.face.clock * 9.0).sin() > -0.2)
+            || (expression == Expression::Yawn && (1.0..1.7).contains(&(self.face.clock % 3.2)))
+            || expression == Expression::Surprised
+        {
+            let height = if expression == Expression::Yawn { 4 } else { 2 };
+            for dy in 0..height {
+                body.line(15, mouth_y + dy, 3, eye);
+            }
+            body.line(15, mouth_y + height - 1, 3, Color::Rgb(218, 130, 168));
+        } else if expression == Expression::Sad {
+            body.line(15, mouth_y, 3, eye);
+            body.put(14, mouth_y + 1, eye);
+            body.put(18, mouth_y + 1, eye);
+        } else {
+            body.put(14, mouth_y, eye);
+            body.line(15, mouth_y + 1, 3, eye);
+            body.put(18, mouth_y, eye);
+        }
+        if self.pet.denied {
+            for y in 0..7 {
+                body.line(12 + y / 2, 20 + y, 8 - y, Color::Rgb(250, 105, 130));
+            }
+            body.line(15, 21, 2, eye);
+            body.put(15, 23, eye);
+        }
+        Ok(body)
+    }
     pub fn compose(&self, width: usize, height: usize) -> Result<Sprite, &'static str> {
         if !self.intensity.is_finite() || !(0.0..=1.0).contains(&self.intensity) {
             return Err("Invalid animation intensity");
@@ -353,109 +570,44 @@ impl Terri {
         }
         let ground = height as i32 - 3;
         let low = Color::Rgb(52, 65, 87);
-        let glow = Color::Rgb(105, 223, 206);
         world.line(1, ground, width as i32 - 2, low);
         // Resting cushion and a small sprout stay secondary to the character.
         let resting =
             (16.0 + self.pet.traits.life.favourite_rest * (width as f32 - 34.0).max(0.0)) as i32;
-        for dy in 0..2 {
-            world.line(resting - 8, ground - 1 - dy, 16, Color::Rgb(80, 71, 116));
-        }
+        world.art(
+            &[
+                "  oooooooooooooo  ",
+                " obccccddddccccbo ",
+                "obbbbbbbbbbbbbbbbo",
+                " oooooooooooooooo ",
+            ],
+            resting - 9,
+            ground - 4,
+        );
+        world.line(resting - 5, ground - 3, 10, Color::Rgb(151, 120, 172));
         let plant = (16.0 + crate::life::PLANT * (width as f32 - 34.0).max(0.0)) as i32;
         world.art(
             &[" e e ", " eee ", "  e  ", " bbb ", " bbb "],
             plant - 2,
             ground - 5,
         );
-        let mut body = Sprite::new(32, 32).ok_or("Invalid sprite bounds")?;
-        body.art(BODY, 1, 1);
-        let t = if self.animate {
-            self.pet.phase + (0.05 - self.pet.remaining().as_secs_f32())
-        } else {
-            0.0
-        };
-        let walking = self.pet.moving && self.animate;
-        if walking {
-            let clip = AnimationClip::new(&FEET, Duration::from_millis(125), true)
-                .ok_or("Invalid walk clip")?;
-            let elapsed = Duration::from_secs_f32(t);
-            body.art(clip.frame(elapsed), 7, 27);
-            body.art(clip.frame(elapsed + Duration::from_millis(250)), 20, 27);
-        } else {
-            body.art(FEET[0], 7, 27);
-            body.art(FEET[0], 20, 27);
-        }
-        let hand = if self.pose.arm > 0.5 {
-            1 + (t * 3.0) as usize % 2
-        } else {
-            0
-        };
-        body.art(HANDS[hand], 0, if hand > 0 { 12 } else { 19 });
-        body.art(HANDS[hand], 28, if hand > 0 { 11 } else { 19 });
-        let eye = Color::Rgb(46, 55, 85);
+        let body = self.body(self.timeline.frame(), self.timeline.index)?;
+        let facing = self.facing_override.unwrap_or(self.pet.facing);
+        let t = if self.animate { self.face.clock } else { 0.0 };
         let light = Color::Rgb(251, 248, 255);
-        let sleep =
-            !self.pet.moving && matches!(self.pet.activity, Activity::Sleep | Activity::Nap);
-        let mood = self.pet.traits.mood;
-        for (i, cx) in [10, 20].into_iter().enumerate() {
-            let cy = 12
-                + if mood == Mood::Confused && i == 1 {
-                    1
-                } else {
-                    0
-                };
-            if sleep
-                || (self.animate && self.pet.blink)
-                || matches!(mood, Mood::Bored | Mood::Sleepy)
-            {
-                body.line(cx, cy + 2, 4, eye);
-            } else if matches!(mood, Mood::Happy | Mood::Excited) {
-                body.line(cx + 1, cy, 2, eye);
-                body.put(cx, cy + 1, eye);
-                body.put(cx + 3, cy + 1, eye);
-            } else {
-                let tall = if mood == Mood::Surprised {
-                    6
-                } else if mood == Mood::Shy {
-                    3
-                } else {
-                    5
-                };
-                for y in 0..tall {
-                    body.line(cx, cy + y, 4, eye);
-                }
-                let gaze = if self.pet.facing > 0.0 { 1 } else { -1 };
-                body.put(cx + 1 + gaze, cy, light);
-                body.put(cx + 1 + gaze, cy + 1, light);
-                body.put(cx + 2, cy + tall - 1, glow);
-                if mood == Mood::Frustrated {
-                    body.line(cx, cy - 1, 4, eye);
-                }
-                if matches!(mood, Mood::Curious | Mood::Focused) {
-                    body.line(cx, cy - 2, 2, eye);
-                }
-            }
-        }
-        if self.pet.speaking && (t * 10.0).sin() > 0.0 {
-            body.line(15, 18, 3, eye);
-            body.line(15, 19, 3, eye);
-        } else if self.pet.gentle || matches!(mood, Mood::Confused | Mood::Frustrated) {
-            body.line(15, 19, 3, eye);
-        } else {
-            body.put(14, 18, eye);
-            body.line(15, 19, 3, eye);
-            body.put(18, 18, eye);
-        }
-        if self.pet.denied {
-            for y in 0..7 {
-                body.line(12 + y / 2, 20 + y, 8 - y, Color::Rgb(250, 105, 130));
-            }
-            body.line(15, 21, 2, eye);
-            body.put(15, 23, eye);
-        }
+        let sleep = self.timeline.id == ClipId::Sleep && self.timeline.index >= 2;
         // Smooth pose transforms around the grounded feet. World position is normalized.
-        let x0 = (self.pet.x * (width as f32 - 34.0).max(0.0)) as i32;
-        let height_scale = self.pose.squash.clamp(0.6, 1.15);
+        let x0 = (self.visual_x * (width as f32 - 34.0).max(0.0)) as i32;
+        let extent = |shape| match shape {
+            Shape::Stand | Shape::Stretch => 26.0,
+            Shape::Seat => 20.0,
+            Shape::Curl => 15.0,
+        };
+        let ratio = extent(self.previous_frame.shape) / extent(self.timeline.frame().shape);
+        let blend = self.transition * self.transition * (3.0 - 2.0 * self.transition);
+        let height_scale = self.pose.squash * (ratio + (1.0 - ratio) * blend);
+        let width_scale = (1.0 / height_scale).sqrt().clamp(0.88, 1.15);
+        world.line(x0 + 7, ground - 1, 20, Color::Rgb(28, 33, 51));
         // Inverse sampling fills stretched rows instead of leaving forward-mapping gaps.
         for dy in -37..=2 {
             let sy = (dy as f32 / height_scale + 30.0).round() as i32;
@@ -463,8 +615,10 @@ impl Terri {
                 continue;
             }
             for dx in -5..38 {
-                let sx = (dx as f32 - self.pose.lean * (1.0 - sy as f32 / 32.0)).round() as i32;
-                let sx = if self.pet.facing < 0.0 { 31 - sx } else { sx };
+                let sx = ((dx as f32 - 16.0) / width_scale + 16.0
+                    - self.pose.lean * facing * (1.0 - sy as f32 / 32.0))
+                    .round() as i32;
+                let sx = if facing < 0.0 { 31 - sx } else { sx };
                 if sx >= 0
                     && let Some(color) = body.get(sx as usize, sy as usize)
                 {
@@ -481,33 +635,71 @@ impl Terri {
                 self.pet.activity,
                 Activity::Play | Activity::Chase | Activity::Balance
             );
-        let orb_x = 16.0 + self.pet.orb.x * (width as f32 - 34.0).max(0.0);
-        let orb_y = ground as f32 - self.pet.orb.height;
+        let orb_x = 16.0 + self.orb_x * (width as f32 - 34.0).max(0.0);
+        let orb_y = ground as f32 - self.orb_height;
+        let pulse = if self.animate {
+            (t * 3.0).sin() * 12.0 * self.intensity
+        } else {
+            0.0
+        };
+        let glow = Color::Rgb(
+            105,
+            (215.0 + pulse) as u8,
+            if self.pet.thinking { 240 } else { 206 },
+        );
         for dy in -2i32..=2 {
             for dx in -2i32..=2 {
                 if dx * dx + dy * dy <= 5 {
                     world.put(
                         orb_x as i32 + dx,
                         orb_y as i32 + dy,
-                        if dx < 0 && dy < 0 { light } else { glow },
+                        if (dx as f32 - (t * 2.0).cos()).abs() < 1.0 && dy < 0 {
+                            light
+                        } else if dx + dy > 2 {
+                            Color::Rgb(45, 135, 139)
+                        } else {
+                            glow
+                        },
                     );
                 }
             }
         }
-        // Fixed upper bound: at most six independent particles, no growing collection.
+        // Six retained trail samples; no per-frame particle allocation.
         if self.animate
             && self.intensity > 0.0
-            && (play
-                || self.pet.thinking
-                || matches!(self.pet.activity, Activity::Dance | Activity::Celebrate))
+            && (play || self.preview == Some(ClipId::Play) || self.pet.thinking)
         {
-            for n in 0..6 {
-                let phase = t * 2.0 + n as f32 * 1.047;
+            for (i, (x, h)) in self.trail.iter().enumerate().skip(1) {
+                let c = Color::Rgb(45, 145 - i as u8 * 12, 140 - i as u8 * 10);
                 world.put(
-                    (orb_x + phase.cos() * 5.0) as i32,
-                    (orb_y + phase.sin() * 4.0) as i32,
-                    if n % 2 == 0 { glow } else { light },
+                    (16.0 + x * (width as f32 - 34.0).max(0.0)) as i32,
+                    (ground as f32 - h) as i32,
+                    c,
                 );
+            }
+        }
+        if self.animate && self.intensity > 0.0 {
+            for n in 0..3 {
+                let phase = t * 0.7 + n as f32 * 2.1;
+                world.put(
+                    (width as f32 * (0.2 + n as f32 * 0.3)) as i32,
+                    ground - 5 - (phase.sin() * 2.0) as i32,
+                    Color::Rgb(49, 76, 85),
+                );
+            }
+            if self.land_flash > 0.0 {
+                for dx in [-3, 0, 29, 33] {
+                    world.put(x0 + dx, ground - 2, low);
+                }
+            }
+        }
+        if self.guides {
+            for x in 0..32 {
+                world.put(x0 + x, ground - 31, Color::Rgb(90, 100, 120));
+            }
+            world.line(x0 + 14, ground - 1, 5, Color::Rgb(255, 190, 80));
+            for y in 0..32 {
+                world.put(x0 + 16, ground - y, Color::Rgb(80, 100, 110));
             }
         }
         if sleep {
@@ -580,6 +772,74 @@ mod tests {
     use super::*;
     use terrabox::{Rect, Size, Surface};
     #[test]
+    fn faces_layers_and_rendering_are_repeatable() {
+        let mut t = default_terri();
+        for id in ClipId::ALL {
+            t.preview_clip(id);
+            for expression in Expression::ALL {
+                t.face.override_expression = Some(expression);
+                t.advance(Duration::from_millis(50));
+                let snapshot = t.pet.snapshot();
+                let a = t.compose(80, 44).unwrap();
+                let b = t.compose(80, 44).unwrap();
+                assert_eq!(a.pixels, b.pixels);
+                assert!(a.pixels.iter().any(Option::is_some));
+                assert_eq!(snapshot, t.pet.snapshot());
+            }
+        }
+        let mut s = Sprite::new(4, 4).unwrap();
+        s.art(&[" o"], 0, 0);
+        assert!(s.get(0, 0).is_none());
+        assert!(s.get(1, 0).is_some());
+    }
+    #[test]
+    fn reduced_motion_pause_and_orb_contacts() {
+        let mut t = default_terri();
+        t.intensity = 0.0;
+        t.preview_clip(ClipId::Jump);
+        for _ in 0..20 {
+            t.advance(Duration::from_millis(50));
+            assert_eq!(t.pose.lift, 0.0);
+        }
+        t.paused = true;
+        let index = t.timeline.index;
+        t.advance(Duration::from_secs(1));
+        assert_eq!(t.timeline.index, index);
+        t.paused = false;
+        t.intensity = 1.0;
+        t.preview_clip(ClipId::Play);
+        let mut caught = false;
+        let mut thrown = false;
+        for _ in 0..80 {
+            t.advance(Duration::from_millis(50));
+            assert!((3.0..=40.0).contains(&t.orb_height));
+            assert!((0.0..=1.0).contains(&t.orb_x));
+            caught |= t.orb_held;
+            thrown |= t.orb_velocity > 0.0;
+            if t.orb_held && t.timeline.elapsed_ms > 200 {
+                assert!((t.orb_x - t.visual_x).abs() < 0.03);
+            }
+        }
+        assert!(caught && thrown);
+    }
+    #[test]
+    fn authored_silhouettes_and_walk_contacts_differ() {
+        let mut t = default_terri();
+        let mut images = Vec::new();
+        for id in [ClipId::Idle, ClipId::Sit, ClipId::Sleep] {
+            t.preview_clip(id);
+            for _ in 0..30 {
+                t.advance(Duration::from_millis(50));
+            }
+            images.push(t.body(t.timeline.frame(), t.timeline.index).unwrap().pixels);
+        }
+        assert_ne!(images[0], images[1]);
+        assert_ne!(images[1], images[2]);
+        let c = crate::motion::clip(ClipId::Walk);
+        assert_ne!(c.frames[0].feet, c.frames[2].feet);
+        assert_ne!(c.frames[0].arms, c.frames[2].arms);
+    }
+    #[test]
     fn frame_clips_loop_or_hold_last_frame() {
         let clip = AnimationClip::new(&FEET, Duration::from_millis(100), true).unwrap();
         assert_eq!(clip.frame(Duration::from_millis(100)), FEET[1]);
@@ -631,7 +891,8 @@ mod tests {
         t.pet.x = t.pet.traits.life.favourite_rest;
         t.pet.demo_activity(Activity::Sleep);
         t.advance(Duration::from_millis(50));
-        assert!(t.pose.squash > 0.65 && t.pose.squash < 1.0);
+        assert_eq!(t.timeline.id, ClipId::Sleep);
+        assert!(t.pose.squash.is_finite());
         t.intensity = f32::NAN;
         assert!(t.compose(40, 40).is_err());
     }

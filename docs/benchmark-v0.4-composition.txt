@@ -1,0 +1,3 @@
+target_fps=20 composition_mean_us=77.31 p99_us=124.41 simulation_ticks=400
+target_fps=30 composition_mean_us=76.22 p99_us=106.81 simulation_ticks=399
+target_fps=60 composition_mean_us=75.66 p99_us=105.91 simulation_ticks=400

@@ -65,3 +65,23 @@ confirms animation-disabled sessions do not generate periodic redraws.
 
 Raw results: [PTY](benchmark-v0.3-pty.json),
 [composition](benchmark-v0.3-composition.txt).
+
+## v0.4 animation measurements
+
+Three drained-PTY samples per rate, with autonomous life and the new presentation
+layer, measured:
+
+| Target FPS | Observed FPS | CPU (% of one core) |
+| --- | --- | --- |
+| 20 | 19.76–19.77 | 1.06–1.10 |
+| 30 | 29.75–29.78 | 1.57–1.63 |
+| 60 | 56.95–57.00 | 2.87–3.00 |
+
+CPU-only composition averaged 75.66–77.31 µs, with p99 105.91–124.41 µs.
+The default remains 20 FPS. These measurements cover local process/PTY costs,
+not a GUI terminal emulator or Ollama inference. The final cue/gaze refinement
+adds only bounded scalar work; timings above precede that refinement.
+
+Raw results: [PTY](benchmark-v0.4-pty.json),
+[composition](benchmark-v0.4-composition.txt). Static-animation redraw suppression
+remains covered by the terminal suite.

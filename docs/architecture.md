@@ -119,3 +119,27 @@ Snapshot version 2 adds `Life` metadata. Version 1 is parsed and migrated in mem
 before validation, with no write until ordinary clean shutdown. Unsupported/corrupt
 files retain the prior preservation behavior. No offline catch-up runs. Routine
 and needs resume, but transient movement, animation timers and model requests reset.
+
+## v0.4 presentation timelines
+
+`motion.rs` owns named clips, statically authored frame tables, variable durations,
+loop/one-shot/ping-pong playback, entry loops, priorities and an eight-event bounded
+buffer. Sub-millisecond residue survives ordinary updates, so 60-Hz presentation
+does not systematically run slower than 20-Hz presentation. Long stalls advance
+at most one second. Completed one-shots hold their last pose. Higher-priority
+conversation clips can preempt protected physical sequences.
+
+`art.rs` adds seated, curled and stretched pixel silhouettes to the standing model.
+`animation.rs` composes habitat, shadow, body, feet/hands, face, orb and effects.
+Shape transitions interpolate their grounded extent with eased timing and limited
+volume compensation; pose motion settles independently. Facing mirrors local
+character coordinates, including hand contacts. The separate face clock preserves
+blink timing and expression/gaze across body transitions. Validated cosmetic
+nods, waves and tilts remain subordinate to conversation and sensitive-context rules.
+
+The renderer retains two bounded logical sprite allocations per composition and
+uses no particle allocation. Orb trails have six samples, ambient motes three,
+and contact marks four. State is updated only by presentation advance; compose
+and draw do not advance either simulation or timelines. Existing TerraBox clipping,
+half-block cells, palette conversion and changed-row terminal output remain the
+only rendering path. Preview overrides never persist and never send model requests.

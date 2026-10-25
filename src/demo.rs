@@ -2,6 +2,7 @@
 use crate::{
     animation::{Palette, Terri, validate_fps},
     config::PetConfig,
+    motion::{ClipId, Expression},
     pet::{Activity, Mood, PetEvent, Snapshot},
 };
 use std::{
@@ -18,6 +19,10 @@ struct Demo {
     seed: u64,
     index: usize,
     mood: usize,
+    clip_index: usize,
+    expression: usize,
+    showcase: bool,
+    next_showcase: Instant,
     fake_end: Option<Instant>,
     stop: Option<Instant>,
     frames: u64,
@@ -41,6 +46,11 @@ impl App for Demo {
                 let elapsed = now - self.last;
                 self.last = now;
                 if let Some(t) = c.desktop.widget_mut::<Terri>(self.id) {
+                    if self.showcase && now >= self.next_showcase {
+                        t.preview_clip(ClipId::ALL[self.clip_index % ClipId::ALL.len()]);
+                        self.clip_index += 1;
+                        self.next_showcase = now + Duration::from_secs(4);
+                    }
                     t.advance(elapsed);
                     if self.fake_end.is_some_and(|end| now >= end) {
                         t.event(PetEvent::Done("Here is a careful explanation."));
@@ -50,9 +60,17 @@ impl App for Demo {
                 if self.clock.poll(now).is_some()
                     && c.desktop
                         .widget_mut::<Terri>(self.id)
-                        .is_some_and(|t| t.animate && t.fault.is_none())
+                        .is_some_and(|t| t.animate && !t.paused && t.fault.is_none())
                 {
                     self.frames += 1;
+                    if let Some(t) = c.desktop.widget_mut::<Terri>(self.id)
+                        && t.preview.is_some()
+                    {
+                        c.desktop.status.text = format!(
+                            " TERRI preview · {:.1} FPS · [/] clip · Space pause · . step · ,/; speed · X face · V facing · G guides · Enter replay · Z life · Q quit",
+                            self.frames as f64 / self.start.elapsed().as_secs_f64().max(0.001)
+                        );
+                    }
                     c.redraw();
                 }
                 let deadline = self
@@ -75,6 +93,43 @@ impl App for Demo {
                 }
                 if let Some(t) = c.desktop.widget_mut::<Terri>(self.id) {
                     match k.key {
+                        Key::Char('[' | ']') => {
+                            self.showcase = false;
+                            self.clip_index = if k.key == Key::Char(']') {
+                                (self.clip_index + 1) % 16
+                            } else {
+                                (self.clip_index + 15) % 16
+                            };
+                            t.preview_clip(ClipId::ALL[self.clip_index]);
+                        }
+                        Key::Char(' ') => t.paused = !t.paused,
+                        Key::Char('.') => {
+                            t.paused = true;
+                            t.step_frame();
+                        }
+                        Key::Char(',') => t.speed = (t.speed / 1.25).max(0.1),
+                        Key::Char(';') => t.speed = (t.speed * 1.25).min(3.0),
+                        Key::Char('x') => {
+                            self.expression = (self.expression + 1) % Expression::ALL.len();
+                            t.face.override_expression = Some(Expression::ALL[self.expression]);
+                            t.face.expression = Expression::ALL[self.expression];
+                        }
+                        Key::Char('v') => {
+                            t.facing_override = Some(-t.facing_override.unwrap_or(t.pet.facing))
+                        }
+                        Key::Char('g') => t.guides = !t.guides,
+                        Key::Char('z') => {
+                            t.preview = None;
+                            self.showcase = false;
+                            t.face.override_expression = None;
+                            t.facing_override = None;
+                            t.paused = false;
+                        }
+                        Key::Enter => {
+                            if let Some(id) = t.preview {
+                                t.preview_clip(id);
+                            }
+                        }
                         Key::Char('m') => {
                             self.mood = (self.mood + 1) % Mood::ALL.len();
                             t.pet.traits.mood = Mood::ALL[self.mood];
@@ -147,6 +202,8 @@ impl App for Demo {
 pub fn run() -> io::Result<()> {
     let mut fps = 20;
     let mut auto = true;
+    let mut showcase = false;
+    let mut selected_clip = None;
     let mut diagnostics = false;
     let mut seed = PetConfig::default().seed;
     let mut seconds = None;
@@ -155,6 +212,18 @@ pub fn run() -> io::Result<()> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--auto" => auto = true,
+            "--showcase" => showcase = true,
+            "--clip" => {
+                let name = args
+                    .next()
+                    .ok_or_else(|| io::Error::other("Missing clip"))?;
+                selected_clip = Some(
+                    ClipId::ALL
+                        .into_iter()
+                        .find(|id| format!("{id:?}").eq_ignore_ascii_case(&name))
+                        .ok_or_else(|| io::Error::other("Unknown animation clip"))?,
+                );
+            }
             "--manual" => auto = false,
             "--diagnostics" => diagnostics = true,
             "--seed" => {
@@ -186,7 +255,7 @@ pub fn run() -> io::Result<()> {
             "--ascii" => palette = Palette::Ascii,
             "--help" => {
                 println!(
-                    "Terri demo: --auto --manual --diagnostics --seed 7 --fps 20 --seconds 10 --indexed --ascii\nM mood · N next activity · B boredom · E lower energy · S sleep · W wake · F fake response · D denial · R reset · A autonomous · I diagnostics · O orb · C chase · H attention · U curiosity · L comfort · T day/night · P animation · +/- intensity · Q/Esc/Ctrl+C quit"
+                    "Terri demo: --showcase --clip Jump --auto --manual --diagnostics --seed 7 --fps 20 --seconds 10 --indexed --ascii\nM mood · N next activity · B boredom · E lower energy · S sleep · W wake · F fake response · D denial · R reset · A autonomous · I diagnostics · O orb · C chase · H attention · U curiosity · L comfort · T day/night · P animation · +/- intensity · Q/Esc/Ctrl+C quit\nPreview: [/] clip · Space pause · . next frame · ,/; speed · X expression · V facing · G guides · Enter replay · Z life"
                 );
                 return Ok(());
             }
@@ -214,6 +283,9 @@ pub fn run() -> io::Result<()> {
         Snapshot::new(seed),
     );
     terri.palette = palette;
+    if let Some(id) = selected_clip {
+        terri.preview_clip(id);
+    }
     let id = desktop.add_window(terri);
     desktop.layout = Layout::Window(id);
     desktop.status.text=" TERRI · M mood · N activity · B bored · E energy · S sleep · W wake · F speak · D denial · R reset · A auto · I inspect · O orb · C chase · P pause · +/- motion · Q quit".into();
@@ -227,6 +299,12 @@ pub fn run() -> io::Result<()> {
         seed,
         index: 0,
         mood: 0,
+        clip_index: selected_clip
+            .and_then(|id| ClipId::ALL.iter().position(|v| *v == id))
+            .unwrap_or(0),
+        expression: 0,
+        showcase,
+        next_showcase: now,
         fake_end: None,
         stop: seconds.map(|s| now + Duration::from_secs(s)),
         frames: 0,

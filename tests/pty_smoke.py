@@ -256,6 +256,24 @@ class Smoke(unittest.TestCase):
             t.close()
         self.assertEqual(t.saved_state["life"]["interactions"][1], 1)
 
+    def test_animation_preview_controls(self):
+        t = Terminal(self.endpoint, command=[str(ROOT / "target/release/examples/terri-demo"), "--clip", "Jump"])
+        try:
+            t.wait_for("Jump")
+            t.send(" ")
+            t.wait_for("paused")
+            t.send(".,;xvg")
+            t.pump(0.2)
+            t.send("]")
+            t.wait_for("Sit")
+            for w,h in [(28,8),(1,1),(110,30)]:
+                t.resize(w,h);t.pump(0.1)
+            t.send("z")
+            t.send("f")
+            t.wait_for("Speaking")
+        finally:
+            t.close(b"q")
+
     def test_empty_models(self):
         self.server.models = []
         t = Terminal(self.endpoint, "auto")

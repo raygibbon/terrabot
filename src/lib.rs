@@ -8,3 +8,6 @@ pub mod persistence;
 pub mod pet;
 pub mod provider;
 pub mod ui;
+
+mod art;
+pub mod motion;

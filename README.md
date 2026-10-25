@@ -1,4 +1,4 @@
-# Terrabot v0.3 — Terri
+# Terrabot v0.4 — Terri
 
 Terri is a curious, technically capable AI companion who lives in your terminal.
 Her handcrafted lilac coat, mint orb, expressive eyes and tiny feet are drawn
@@ -241,3 +241,52 @@ cargo run --release --example terri-life -- 86400 7
 
 It checks bounds every tick and reports time in each activity, transitions, longest
 activity and final state as JSON. The injected day/night schedule starts at noon.
+
+## v0.4 animation studio
+
+The presentation layer now has sixteen named, hand-authored clips: Idle, Walk,
+Run, Jump, Sit, Sleep, Wake, Think, Talk, Happy, Sad, Curious, Bored, Play,
+Celebrate and Stumble. Distinct standing, seated, curled and stretched artwork
+shares Terri's lilac shading, mint light, feet and facial proportions. Authored
+foot and hand contacts, timed anticipation/recovery, independent face motion and
+small secondary effects replace the previous pose-only system.
+
+```bash
+cargo run --release --example terri-demo -- --showcase
+cargo run --release --example terri-demo -- --clip Jump
+```
+
+| Preview control | Action |
+| --- | --- |
+| `[` / `]` | Previous / next animation |
+| Space | Pause / resume playback |
+| `.` | Pause and advance exactly one authored frame |
+| `,` / `;` | Slower / faster playback, 0.1×–3× |
+| X | Cycle facial expressions independently |
+| V | Reverse facing |
+| G | Toggle sprite extent and ground/center anchors |
+| Enter | Replay selected clip from the start |
+| Z | Return to autonomous life and clear preview overrides |
+
+Existing demo controls remain available, including P for animation visibility,
++/− for motion intensity and M for simulation mood. The preview status shows
+observed FPS; the character label shows clip, frame, frame time, speed and pause
+state. One-shot clips hold their final pose until replayed or replaced. Showcase
+mode displays each clip for four seconds. This is separate from `--auto`, which
+runs the life simulation rather than forcing animations.
+
+Loops can retain an introductory sequence: sleep sits and curls before its
+breathing loop, while sitting holds a seated pose. Thinking and curiosity use
+ping-pong timing. Jump/stumble/wake/celebration protect their short sequences from
+lower-priority animation changes; thinking and speaking can interrupt them.
+Presentation never blocks provider events or changes saved pet needs.
+
+Play clips reach, lift, throw, catch and place the orb. Bounded catch/release/landing
+and foot-contact events drive presentation effects. The face keeps its own clock
+for blinking, gaze and speech, preserving expression continuity across body clips.
+Reduced motion removes large lifts and secondary effects; narrow viewports retain
+clipped, half-size logical-pixel rendering.
+
+Real before/after terminal recordings and capture instructions are described in
+[the recording notes](docs/captures/README.md). No graphical assets or alternative
+rendering backends are used.
