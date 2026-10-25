@@ -1,6 +1,8 @@
 # Terrabot v0.5.0 — Floating Trixie
 
-![Trixie animated sprite preview](docs/captures/v050/trixie-preview.gif)
+<div align="center">
+  <img src="docs/captures/v050/trixie-preview.gif" alt="Trixie floating animation" width="360">
+</div>
 
 *Animated preview assembled from v0.5.0's handcrafted sprite poses. For real terminal output, see the [v0.5.0 captures](docs/captures/v050/README.md).*
 
