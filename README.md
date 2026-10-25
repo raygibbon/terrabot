@@ -1,10 +1,11 @@
 # Terrabot v0.5.0 — Floating Trixie
 
 <div align="center">
-  <img src="docs/captures/v050/trixie-preview.gif" alt="Trixie floating animation" width="360">
+  <img src="docs/captures/v050/showcase-Idle.png" width="65%" alt="Trixie running inside the terminal">
+  <p><a href="docs/captures/v050/trixie-preview.gif">Watch the animated Trixie GIF</a></p>
 </div>
 
-*Animated preview assembled from v0.5.0's handcrafted sprite poses. For real terminal output, see the [v0.5.0 captures](docs/captures/v050/README.md).*
+*Verified v0.5.0 terminal capture. The separate GIF is a sprite preview; for more real terminal output, see the [v0.5.0 captures](docs/captures/v050/README.md).*
 
 Trixie is a curious, technically capable AI companion who lives in your terminal.
 Her handcrafted lilac body, large rounded arms, expressive eyes and turquoise orb are drawn
