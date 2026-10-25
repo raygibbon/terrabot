@@ -26,7 +26,23 @@ pub fn load(path: &Path, seed: u64) -> Result<Snapshot, String> {
     if bytes.len() as u64 > LIMIT {
         return Err("Terri state exceeds 16 KiB".into());
     }
-    let state: Snapshot = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    let mut value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    match value["version"].as_u64() {
+        Some(1) => {
+            let object = value.as_object_mut().ok_or("Invalid state object")?;
+            if object.contains_key("life") {
+                return Err("Unexpected life field in legacy state".into());
+            }
+            object.insert("version".into(), 2.into());
+            object.insert(
+                "life".into(),
+                serde_json::to_value(crate::life::Life::new(seed)).map_err(|e| e.to_string())?,
+            );
+        }
+        Some(2) => {}
+        _ => return Err("Unsupported Terri state version".into()),
+    }
+    let state: Snapshot = serde_json::from_value(value).map_err(|e| e.to_string())?;
     state.validate()?;
     Ok(state)
 }
@@ -63,6 +79,24 @@ pub fn save(path: &Path, state: &Snapshot) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn migrates_legacy_without_losing_metadata() {
+        let path = std::env::temp_dir().join(format!("terrabot-migration-{}", std::process::id()));
+        let mut legacy = serde_json::to_value(Snapshot::new(19)).unwrap();
+        legacy.as_object_mut().unwrap().remove("life");
+        legacy["version"] = 1.into();
+        legacy["conversations"] = 42.into();
+        let original = serde_json::to_vec(&legacy).unwrap();
+        fs::write(&path, &original).unwrap();
+        let migrated = load(&path, 19).unwrap();
+        assert_eq!(migrated.version, 2);
+        assert_eq!(migrated.conversations, 42);
+        assert_eq!(migrated.life, crate::life::Life::new(19));
+        assert_eq!(fs::read(&path).unwrap(), original);
+        save(&path, &migrated).unwrap();
+        assert_eq!(load(&path, 0).unwrap(), migrated);
+        fs::remove_file(path).unwrap();
+    }
     #[test]
     fn roundtrip_atomic_and_invalid_preserved() {
         let path = std::env::temp_dir()

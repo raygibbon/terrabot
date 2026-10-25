@@ -1,0 +1,311 @@
+{
+  "deterministic_repeat_equal": true,
+  "runs": [
+    {
+      "activities": [
+        {
+          "activity": "Wander",
+          "entries": 1239,
+          "seconds": 19556.5
+        },
+        {
+          "activity": "Sit",
+          "entries": 504,
+          "seconds": 6750.55
+        },
+        {
+          "activity": "Play",
+          "entries": 1066,
+          "seconds": 17171.7
+        },
+        {
+          "activity": "Investigate",
+          "entries": 13,
+          "seconds": 196.25
+        },
+        {
+          "activity": "Sleep",
+          "entries": 536,
+          "seconds": 11141.15
+        },
+        {
+          "activity": "Wake",
+          "entries": 536,
+          "seconds": 1608.0
+        },
+        {
+          "activity": "Dance",
+          "entries": 13,
+          "seconds": 189.5
+        },
+        {
+          "activity": "Stumble",
+          "entries": 0,
+          "seconds": 0.0
+        },
+        {
+          "activity": "Watch",
+          "entries": 118,
+          "seconds": 2031.0
+        },
+        {
+          "activity": "Celebrate",
+          "entries": 0,
+          "seconds": 0.0
+        },
+        {
+          "activity": "Explore",
+          "entries": 184,
+          "seconds": 2835.0
+        },
+        {
+          "activity": "Chase",
+          "entries": 45,
+          "seconds": 1589.45
+        },
+        {
+          "activity": "Balance",
+          "entries": 57,
+          "seconds": 923.45
+        },
+        {
+          "activity": "Rest",
+          "entries": 559,
+          "seconds": 12400.25
+        },
+        {
+          "activity": "Nap",
+          "entries": 368,
+          "seconds": 7964.85
+        },
+        {
+          "activity": "Search",
+          "entries": 0,
+          "seconds": 0.0
+        },
+        {
+          "activity": "Attention",
+          "entries": 120,
+          "seconds": 2042.35
+        }
+      ],
+      "longest_activity_seconds": 46.6,
+      "seconds": 86400,
+      "seed": 7,
+      "state": {
+        "active_ticks": 1728000,
+        "boredom": 0.0,
+        "conversations": 0,
+        "curiosity": 0.7686947584152222,
+        "energy": 0.9639997482299805,
+        "interactions": 0,
+        "last_interaction": "none",
+        "life": {
+          "character": [
+            0.5290000438690186,
+            0.6820000410079956,
+            0.6399999856948853
+          ],
+          "comfort": 0.5289425253868103,
+          "familiarity": 0.0,
+          "favourite_explore": 0.499965101480484,
+          "favourite_rest": 0.518734335899353,
+          "interactions": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "object_familiarity": 0.8299993872642517,
+          "position": 0.2355855256319046,
+          "preferences": [
+            0.7212400436401367,
+            0.6294229030609131,
+            0.7078630328178406,
+            0.5001837611198425,
+            0.5833718776702881,
+            0.5,
+            0.5038802027702332,
+            0.5,
+            0.5344080924987793,
+            0.5,
+            0.5510510206222534,
+            0.5120065808296204,
+            0.515624463558197,
+            0.6485964059829712,
+            0.5683092474937439,
+            0.5,
+            0.5383324027061462
+          ],
+          "restfulness": 0.9760003089904785,
+          "routine": "play"
+        },
+        "mood": "happy",
+        "playfulness": 0.83307945728302,
+        "preferred": [
+          "play",
+          "investigate",
+          "wander"
+        ],
+        "rng_state": 11338370492370157392,
+        "sessions": 0,
+        "sociability": 1.0,
+        "version": 2
+      }
+    },
+    {
+      "activities": [
+        {
+          "activity": "Wander",
+          "entries": 1310,
+          "seconds": 20645.85
+        },
+        {
+          "activity": "Sit",
+          "entries": 490,
+          "seconds": 6635.95
+        },
+        {
+          "activity": "Play",
+          "entries": 711,
+          "seconds": 11353.8
+        },
+        {
+          "activity": "Investigate",
+          "entries": 14,
+          "seconds": 211.45
+        },
+        {
+          "activity": "Sleep",
+          "entries": 538,
+          "seconds": 10953.7
+        },
+        {
+          "activity": "Wake",
+          "entries": 538,
+          "seconds": 1614.0
+        },
+        {
+          "activity": "Dance",
+          "entries": 213,
+          "seconds": 2884.3
+        },
+        {
+          "activity": "Stumble",
+          "entries": 0,
+          "seconds": 0.0
+        },
+        {
+          "activity": "Watch",
+          "entries": 146,
+          "seconds": 2473.1
+        },
+        {
+          "activity": "Celebrate",
+          "entries": 0,
+          "seconds": 0.0
+        },
+        {
+          "activity": "Explore",
+          "entries": 172,
+          "seconds": 2583.9
+        },
+        {
+          "activity": "Chase",
+          "entries": 30,
+          "seconds": 1026.55
+        },
+        {
+          "activity": "Balance",
+          "entries": 33,
+          "seconds": 547.85
+        },
+        {
+          "activity": "Rest",
+          "entries": 565,
+          "seconds": 12508.65
+        },
+        {
+          "activity": "Nap",
+          "entries": 489,
+          "seconds": 10586.15
+        },
+        {
+          "activity": "Search",
+          "entries": 0,
+          "seconds": 0.0
+        },
+        {
+          "activity": "Attention",
+          "entries": 138,
+          "seconds": 2374.75
+        }
+      ],
+      "longest_activity_seconds": 47.75,
+      "seconds": 86400,
+      "seed": 99,
+      "state": {
+        "active_ticks": 1728000,
+        "boredom": 0.17599992454051971,
+        "conversations": 0,
+        "curiosity": 0.7746948003768921,
+        "energy": 1.0,
+        "interactions": 0,
+        "last_interaction": "none",
+        "life": {
+          "character": [
+            0.3869999945163727,
+            0.2770000100135803,
+            0.3199999928474426
+          ],
+          "comfort": 0.6217804551124573,
+          "familiarity": 0.0,
+          "favourite_explore": 0.5270837545394897,
+          "favourite_rest": 0.5111323595046997,
+          "interactions": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "object_familiarity": 0.8899993300437927,
+          "position": 0.5175859928131104,
+          "preferences": [
+            0.7216175198554993,
+            0.6319494843482971,
+            0.6638376712799072,
+            0.5001999735832214,
+            0.5816712975502014,
+            0.5,
+            0.564325749874115,
+            0.5,
+            0.5521045923233032,
+            0.5,
+            0.5493219494819641,
+            0.5106043219566345,
+            0.5104382634162903,
+            0.6457425355911255,
+            0.5786309242248535,
+            0.5,
+            0.5365504622459412
+          ],
+          "restfulness": 1.0,
+          "routine": "rest"
+        },
+        "mood": "content",
+        "playfulness": 0.9195090532302856,
+        "preferred": [
+          "play",
+          "investigate",
+          "wander"
+        ],
+        "rng_state": 16470021271351427419,
+        "sessions": 0,
+        "sociability": 0.9119998216629028,
+        "version": 2
+      }
+    }
+  ]
+}

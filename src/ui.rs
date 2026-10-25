@@ -22,9 +22,11 @@ const EDIT: CommandId = CommandId(2);
 const INPUT_LIMIT: usize = 8192;
 const HISTORY_LIMIT: usize = 512 * 1024;
 const TICK: TimerId = TimerId(1);
+const PET_CONTROL: CommandId = CommandId(5);
 const QUIT: CommandId = CommandId(4);
 const SELECT_MODEL: CommandId = CommandId(3);
 struct ModelPicker {
+    command: CommandId,
     names: Vec<String>,
     list: Panel,
 }
@@ -37,7 +39,7 @@ impl Widget for ModelPicker {
         {
             EventResult::command(QUIT)
         } else if matches!(event, Event::Key(k) if k.key == Key::Enter) {
-            EventResult::command(SELECT_MODEL)
+            EventResult::command(self.command)
         } else {
             self.list.event(event)
         }
@@ -269,7 +271,7 @@ impl Chat {
             );
         }
         c.desktop.status.text = format!(
-            " {} · Tools disabled | Enter Send · Esc Cancel · PgUp/Dn Scroll · F2/F3 Panel · F5 Retry · F6 Models · Ctrl+Q Quit",
+            " {} · Tools disabled | Enter Send · Esc Cancel · PgUp/Dn Scroll · F2/F3 Panel · F4 Pet · F5 Retry · F6 Models · Ctrl+Q Quit",
             self.config.ollama.model
         );
         c.redraw();
@@ -369,12 +371,48 @@ impl Chat {
         }
         self.picker = Some(c.desktop.show_modal(
             ModelPicker {
+                command: SELECT_MODEL,
                 list,
                 names: self.models.iter().map(|m| m.name.clone()).collect(),
             },
             terrabox::Size {
                 width: 80,
                 height: 16,
+            },
+        ));
+        c.redraw();
+    }
+    fn pet_controls(&mut self, c: &mut Context<'_, ()>) {
+        if c.desktop.has_modal() {
+            return;
+        }
+        let summary = self
+            .widget::<Terri>(c, self.terri)
+            .map(|t| t.label())
+            .unwrap_or_default();
+        let names: Vec<String> = [
+            "Get Terri's attention",
+            "Offer the orb",
+            "Ask her to play",
+            "Ask her to rest",
+            "Gently wake her",
+            "Inspect / toggle diagnostics",
+            "Toggle autonomous life",
+            "Reset learned preferences",
+        ]
+        .iter()
+        .map(|s| (*s).into())
+        .collect();
+        let list = Panel::new(format!("Terri · {summary} · Enter / Esc"), names.clone());
+        self.picker = Some(c.desktop.show_modal(
+            ModelPicker {
+                command: PET_CONTROL,
+                names,
+                list,
+            },
+            terrabox::Size {
+                width: 76,
+                height: 13,
             },
         ));
         c.redraw();
@@ -642,6 +680,30 @@ impl App for Chat {
                     self.activate(c, name);
                 }
             }
+            AppEvent::Command(PET_CONTROL) => {
+                let selected = self
+                    .picker
+                    .and_then(|id| c.desktop.widget_mut::<ModelPicker>(id))
+                    .and_then(|p| p.list.selected());
+                c.desktop.close_modal();
+                self.picker = None;
+                if let Some(t) = self.widget::<Terri>(c, self.terri) {
+                    use crate::life::Action;
+                    match selected {
+                        Some(0) => t.pet.interact(Action::Attention),
+                        Some(1) => t.pet.interact(Action::Orb),
+                        Some(2) => t.pet.interact(Action::Play),
+                        Some(3) => t.pet.interact(Action::Rest),
+                        Some(4) => t.pet.interact(Action::Wake),
+                        Some(5) => t.diagnostics = !t.diagnostics,
+                        Some(6) => t.pet.autonomous = !t.pet.autonomous,
+                        Some(7) => t.pet.reset_preferences(),
+                        _ => {}
+                    }
+                }
+                self.schedule(c);
+                c.redraw();
+            }
             AppEvent::Command(QUIT) => c.quit(),
             AppEvent::Command(SEND) => self.send(c),
             AppEvent::Command(EDIT) => {
@@ -696,6 +758,7 @@ impl App for Chat {
                             self.panel = (self.panel + 2).min(48);
                             self.layout(c);
                         }
+                        Key::Function(4) => self.pet_controls(c),
                         Key::Function(5) => {
                             self.pending = None;
                             self.response.clear();

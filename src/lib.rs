@@ -2,6 +2,7 @@ pub mod animation;
 pub mod config;
 pub mod cues;
 pub mod demo;
+pub mod life;
 pub mod models;
 pub mod persistence;
 pub mod pet;

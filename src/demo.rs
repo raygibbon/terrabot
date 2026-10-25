@@ -1,7 +1,8 @@
 //! Interactive character laboratory. No Ollama or personality-file access.
 use crate::{
-    animation::{Palette, Terri, default_terri, validate_fps},
-    pet::{Activity, Mood, PetEvent},
+    animation::{Palette, Terri, validate_fps},
+    config::PetConfig,
+    pet::{Activity, Mood, PetEvent, Snapshot},
 };
 use std::{
     io,
@@ -14,7 +15,7 @@ struct Demo {
     last: Instant,
     clock: FrameClock,
     auto: bool,
-    next_cycle: Instant,
+    seed: u64,
     index: usize,
     mood: usize,
     fake_end: Option<Instant>,
@@ -41,11 +42,6 @@ impl App for Demo {
                 self.last = now;
                 if let Some(t) = c.desktop.widget_mut::<Terri>(self.id) {
                     t.advance(elapsed);
-                    if self.auto && now >= self.next_cycle {
-                        t.pet.demo_activity(Activity::ALL[self.index % 10]);
-                        self.index += 1;
-                        self.next_cycle = now + Duration::from_secs(4);
-                    }
                     if self.fake_end.is_some_and(|end| now >= end) {
                         t.event(PetEvent::Done("Here is a careful explanation."));
                         self.fake_end = None;
@@ -84,7 +80,8 @@ impl App for Demo {
                             t.pet.traits.mood = Mood::ALL[self.mood];
                         }
                         Key::Char('n') => {
-                            t.pet.demo_activity(Activity::ALL[self.index % 10]);
+                            t.pet
+                                .demo_activity(Activity::ALL[self.index % Activity::ALL.len()]);
                             self.index += 1;
                         }
                         Key::Char('b') => {
@@ -103,11 +100,32 @@ impl App for Demo {
                         Key::Char('d') => t.event(PetEvent::Denied),
                         Key::Char('a') => {
                             self.auto = !self.auto;
-                            self.next_cycle = now;
+                            t.pet.autonomous = self.auto;
                         }
                         Key::Char('r') => {
-                            *t = default_terri();
+                            *t = Terri::new(
+                                PetConfig {
+                                    seed: self.seed,
+                                    autonomous: self.auto,
+                                    diagnostics: t.diagnostics,
+                                    ..PetConfig::default()
+                                },
+                                Snapshot::new(self.seed),
+                            );
                             self.fake_end = None;
+                        }
+                        Key::Char('i') => t.diagnostics = !t.diagnostics,
+                        Key::Char('o') => t.pet.interact(crate::life::Action::Orb),
+                        Key::Char('c') => t.pet.interact(crate::life::Action::Play),
+                        Key::Char('h') => t.pet.interact(crate::life::Action::Attention),
+                        Key::Char('u') => {
+                            t.pet.traits.curiosity = (t.pet.traits.curiosity + 0.25).min(1.0)
+                        }
+                        Key::Char('l') => {
+                            t.pet.traits.life.comfort = (t.pet.traits.life.comfort - 0.25).max(0.0)
+                        }
+                        Key::Char('t') => {
+                            t.pet.set_hour(Some(if t.pet.is_night() { 12 } else { 23 }))
                         }
                         Key::Char('p') => t.animate = !t.animate,
                         Key::Char('-') => t.intensity = (t.intensity - 0.25).max(0.0),
@@ -128,13 +146,24 @@ impl App for Demo {
 }
 pub fn run() -> io::Result<()> {
     let mut fps = 20;
-    let mut auto = false;
+    let mut auto = true;
+    let mut diagnostics = false;
+    let mut seed = PetConfig::default().seed;
     let mut seconds = None;
     let mut palette = Palette::TrueColor;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--auto" => auto = true,
+            "--manual" => auto = false,
+            "--diagnostics" => diagnostics = true,
+            "--seed" => {
+                seed = args
+                    .next()
+                    .ok_or_else(|| io::Error::other("Missing seed"))?
+                    .parse()
+                    .map_err(io::Error::other)?
+            }
             "--fps" => {
                 fps = args
                     .next()
@@ -157,7 +186,7 @@ pub fn run() -> io::Result<()> {
             "--ascii" => palette = Palette::Ascii,
             "--help" => {
                 println!(
-                    "Terri demo: --auto --fps 20 --seconds 10 --indexed --ascii\nM mood · N next activity · B boredom · E lower energy · S sleep · W wake · F fake response · D denial · R reset · A cycle · P animation · +/- intensity · Q/Esc/Ctrl+C quit"
+                    "Terri demo: --auto --manual --diagnostics --seed 7 --fps 20 --seconds 10 --indexed --ascii\nM mood · N next activity · B boredom · E lower energy · S sleep · W wake · F fake response · D denial · R reset · A autonomous · I diagnostics · O orb · C chase · H attention · U curiosity · L comfort · T day/night · P animation · +/- intensity · Q/Esc/Ctrl+C quit"
                 );
                 return Ok(());
             }
@@ -175,11 +204,19 @@ pub fn run() -> io::Result<()> {
         bar: surface,
         ..Theme::default()
     };
-    let mut terri = default_terri();
+    let mut terri = Terri::new(
+        PetConfig {
+            seed,
+            autonomous: auto,
+            diagnostics,
+            ..PetConfig::default()
+        },
+        Snapshot::new(seed),
+    );
     terri.palette = palette;
     let id = desktop.add_window(terri);
     desktop.layout = Layout::Window(id);
-    desktop.status.text=" TERRI · M mood · N pose · B bored · E energy · S sleep · W wake · F speak · D denial · R reset · A auto · P pause · +/- motion · Q quit".into();
+    desktop.status.text=" TERRI · M mood · N activity · B bored · E energy · S sleep · W wake · F speak · D denial · R reset · A auto · I inspect · O orb · C chase · P pause · +/- motion · Q quit".into();
     let metrics = std::rc::Rc::new(std::cell::Cell::new((0, Duration::ZERO)));
     let demo = Demo {
         id,
@@ -187,7 +224,7 @@ pub fn run() -> io::Result<()> {
         clock: FrameClock::new(interval, now)
             .ok_or_else(|| io::Error::other("Invalid frame interval"))?,
         auto,
-        next_cycle: now,
+        seed,
         index: 0,
         mood: 0,
         fake_end: None,

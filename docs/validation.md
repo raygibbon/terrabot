@@ -76,3 +76,38 @@ and switching were tested with the controllable HTTP fixture.
 Limitations: tags without capabilities require a name heuristic. F6 permits a
 manual override, including a model that may reject chat requests. Preference
 writes are atomic but concurrent sessions use last-writer-wins semantics.
+
+## Terri v0.3 life simulation — 2026-10-25
+
+All requested checks passed: `cargo fmt --all --check`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test` (31 unit tests),
+`cargo build --release`, `cargo build --release --examples`, and
+`python3 tests/pty_smoke.py` (12 tests).
+
+New tests cover navigation before interaction, gradual needs and preferences,
+night utility bias, disabling learning, cooldowns, travel time limits,
+conversation priority, autonomy pause and version-1 migration with original-file
+preservation. The PTY pet-control test verifies no model request is made and that
+the draft survives the modal before being sent normally. Existing rendering tests
+now iterate all 17 activities across tiny and large viewports.
+
+Accelerated runs simulated 24 hours each for seeds 7 and 99, checking finite,
+bounded state every 50-ms tick. A repeated seed-7 run was byte-identical. Both
+visited 14 activities; longest uninterrupted activities were 46.6 and 47.75 seconds.
+Celebration requires a success event, while stumbling and searching did not win
+utility selection in these runs; they remain available in the developer demo.
+Results, including activity distributions and evolved preferences, are in
+[life-soak-v0.3.json](life-soak-v0.3.json). The soak exposed an indefinitely extended
+chase during development; travel now has a ten-second budget and a regression test.
+
+A rendered four-pose inspection checked exploration, balance, sleep and investigation
+using the actual sprite composer. The original body artwork remains intact; the
+cushion, plant and orb occupy consistent normalized habitat positions.
+
+These tests use the controllable HTTP fixture for generation and do not benchmark
+local LLM inference. Time-of-day input is injected for deterministic tests. The
+local clock adapter is Unix-specific; other platforms use a neutral time bias.
+
+A 90-second real-terminal autonomous demo (`--auto --diagnostics --seed 7`) also
+completed without a rendering fault, restoring terminal attributes and the alternate
+screen. Terrabox and TerraGame remained unchanged. No commits or pushes were made.

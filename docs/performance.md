@@ -45,3 +45,23 @@ Raw measurements: [terminal samples](benchmark-terminal.json) and
 channels at 32 messages, and state files at 16 KiB. Disabled/hidden chat animation
 uses one simulation wake per second with no idle redraws. The PTY suite checks
 that disabled animation produces no idle output.
+
+## v0.3 life simulation measurements
+
+The same drained-PTY benchmark was repeated after adding utility selection,
+normalized navigation, bounded orb physics and preference learning. Three four-second
+samples per target rate produced:
+
+| Target | Observed FPS | Process CPU (% of one core) |
+| --- | --- | --- |
+| 20 | 19.77–19.78 | 1.01–1.06 |
+| 30 | 29.75–29.77 | 1.49–1.50 |
+| 60 | 57.10–57.13 | 2.78–2.80 |
+
+Composition averaged 73.95–75.93 µs; p99 was 109.68–132.33 µs in the CPU-only
+benchmark. These are local measurements, not GUI terminal-emulator or model
+inference measurements. 20 FPS remains the default. Static-idle PTY coverage
+confirms animation-disabled sessions do not generate periodic redraws.
+
+Raw results: [PTY](benchmark-v0.3-pty.json),
+[composition](benchmark-v0.3-composition.txt).

@@ -208,12 +208,12 @@ impl Pose {
             ..Self::default()
         };
         match p.activity {
-            Activity::Wander => {
+            Activity::Wander | Activity::Explore | Activity::Search => {
                 pose.lift = (t * 8.0).sin().abs() * 0.8 * amount;
                 pose.lean = p.facing * 0.5 * amount;
             }
-            Activity::Sit => pose.squash = 0.9,
-            Activity::Sleep => {
+            Activity::Sit | Activity::Rest => pose.squash = 0.9,
+            Activity::Sleep | Activity::Nap => {
                 pose.squash = 0.65 + (t * 1.3).sin() * 0.02 * amount;
                 pose.lean = 1.0;
             }
@@ -221,7 +221,7 @@ impl Pose {
                 pose.squash = 1.08;
                 pose.arm = 1.0;
             }
-            Activity::Play => {
+            Activity::Play | Activity::Chase | Activity::Balance => {
                 pose.lean = (t * 3.0).sin() * 1.5 * amount;
                 pose.arm = 1.0;
             }
@@ -236,9 +236,15 @@ impl Pose {
                 pose.lean = (p.age * 3.0).sin() * 5.0 * amount;
                 pose.squash = 0.82;
             }
-            Activity::Watch => {
+            Activity::Watch | Activity::Attention => {
                 pose.lean = 0.5 * amount;
             }
+        }
+        if p.moving {
+            pose.squash = 1.0;
+            pose.lift = (t * 9.0).sin().abs() * amount;
+            pose.lean = p.facing * amount;
+            pose.arm = 0.0;
         }
         if p.gesture == Gesture::HeadTilt {
             pose.lean += 2.0 * p.cue_intensity * amount;
@@ -266,11 +272,18 @@ pub struct Terri {
     pub palette: Palette,
     pub fault: Option<String>,
     pose: Pose,
+    pub diagnostics: bool,
+    next_clock: std::time::Instant,
 }
 impl Terri {
     pub fn new(config: PetConfig, state: Snapshot) -> Self {
+        let diagnostics = config.diagnostics;
+        let mut pet = Pet::new(config, state);
+        pet.set_hour(crate::life::local_hour());
         Self {
-            pet: Pet::new(config, state),
+            pet,
+            diagnostics,
+            next_clock: std::time::Instant::now() + Duration::from_secs(60),
             intensity: 1.0,
             animate: true,
             palette: Palette::TrueColor,
@@ -279,6 +292,10 @@ impl Terri {
         }
     }
     pub fn advance(&mut self, elapsed: Duration) {
+        if std::time::Instant::now() >= self.next_clock {
+            self.pet.set_hour(crate::life::local_hour());
+            self.next_clock = std::time::Instant::now() + Duration::from_secs(60);
+        }
         self.pet.advance(elapsed);
         let target = Pose::target(&self.pet, if self.animate { self.intensity } else { 0.0 });
         self.pose.approach(target, elapsed.as_secs_f32());
@@ -304,6 +321,27 @@ impl Terri {
             )
         }
     }
+    pub fn diagnostic_lines(&self) -> Vec<String> {
+        let p = &self.pet;
+        let s = &p.traits;
+        let mut scores: Vec<_> = Activity::ALL.iter().zip(p.utilities.iter()).collect();
+        scores.sort_by(|a, b| b.1.total_cmp(a.1));
+        vec![
+            format!(
+                "{:?} {} x={:.2}",
+                p.activity,
+                if p.moving { "travel" } else { "interact" },
+                p.x
+            ),
+            format!("Energy {:.2} Bored {:.2}", s.energy, s.boredom),
+            format!("Curious {:.2} Play {:.2}", s.curiosity, s.playfulness),
+            format!("Comfort {:.2} Social {:.2}", s.life.comfort, s.sociability),
+            format!("Rest {:.2} night={}", s.life.restfulness, p.is_night()),
+            format!("tick {} auto={}", s.active_ticks, p.autonomous),
+            format!("Utility {:?} {:.1}", scores[0].0, scores[0].1),
+            format!("        {:?} {:.1}", scores[1].0, scores[1].1),
+        ]
+    }
     pub fn compose(&self, width: usize, height: usize) -> Result<Sprite, &'static str> {
         if !self.intensity.is_finite() || !(0.0..=1.0).contains(&self.intensity) {
             return Err("Invalid animation intensity");
@@ -318,12 +356,17 @@ impl Terri {
         let glow = Color::Rgb(105, 223, 206);
         world.line(1, ground, width as i32 - 2, low);
         // Resting cushion and a small sprout stay secondary to the character.
+        let resting =
+            (16.0 + self.pet.traits.life.favourite_rest * (width as f32 - 34.0).max(0.0)) as i32;
         for dy in 0..2 {
-            world.line(3, ground - 1 - dy, 8, Color::Rgb(80, 71, 116));
+            world.line(resting - 8, ground - 1 - dy, 16, Color::Rgb(80, 71, 116));
         }
-        world.put(width as i32 - 5, ground - 1, glow);
-        world.put(width as i32 - 5, ground - 2, glow);
-        world.put(width as i32 - 6, ground - 3, glow);
+        let plant = (16.0 + crate::life::PLANT * (width as f32 - 34.0).max(0.0)) as i32;
+        world.art(
+            &[" e e ", " eee ", "  e  ", " bbb ", " bbb "],
+            plant - 2,
+            ground - 5,
+        );
         let mut body = Sprite::new(32, 32).ok_or("Invalid sprite bounds")?;
         body.art(BODY, 1, 1);
         let t = if self.animate {
@@ -331,7 +374,7 @@ impl Terri {
         } else {
             0.0
         };
-        let walking = self.pet.activity == Activity::Wander && self.animate;
+        let walking = self.pet.moving && self.animate;
         if walking {
             let clip = AnimationClip::new(&FEET, Duration::from_millis(125), true)
                 .ok_or("Invalid walk clip")?;
@@ -351,7 +394,8 @@ impl Terri {
         body.art(HANDS[hand], 28, if hand > 0 { 11 } else { 19 });
         let eye = Color::Rgb(46, 55, 85);
         let light = Color::Rgb(251, 248, 255);
-        let sleep = self.pet.activity == Activity::Sleep;
+        let sleep =
+            !self.pet.moving && matches!(self.pet.activity, Activity::Sleep | Activity::Nap);
         let mood = self.pet.traits.mood;
         for (i, cx) in [10, 20].into_iter().enumerate() {
             let cy = 12
@@ -380,11 +424,7 @@ impl Terri {
                 for y in 0..tall {
                     body.line(cx, cy + y, 4, eye);
                 }
-                let gaze = if self.pet.activity == Activity::Watch {
-                    1
-                } else {
-                    0
-                };
+                let gaze = if self.pet.facing > 0.0 { 1 } else { -1 };
                 body.put(cx + 1 + gaze, cy, light);
                 body.put(cx + 1 + gaze, cy + 1, light);
                 body.put(cx + 2, cy + tall - 1, glow);
@@ -424,6 +464,7 @@ impl Terri {
             }
             for dx in -5..38 {
                 let sx = (dx as f32 - self.pose.lean * (1.0 - sy as f32 / 32.0)).round() as i32;
+                let sx = if self.pet.facing < 0.0 { 31 - sx } else { sx };
                 if sx >= 0
                     && let Some(color) = body.get(sx as usize, sy as usize)
                 {
@@ -435,17 +476,13 @@ impl Terri {
                 }
             }
         }
-        let play = self.pet.activity == Activity::Play;
-        let orb_x = if play {
-            x0 as f32 + 16.0 + (t * 2.0).sin() * 12.0 * self.intensity
-        } else {
-            x0 as f32 + 27.0
-        };
-        let orb_y = if play {
-            ground as f32 - 21.0 - (t * 2.0).cos().abs() * 10.0 * self.intensity
-        } else {
-            ground as f32 - 32.0 + (t * 2.0).sin() * self.intensity
-        };
+        let play = !self.pet.moving
+            && matches!(
+                self.pet.activity,
+                Activity::Play | Activity::Chase | Activity::Balance
+            );
+        let orb_x = 16.0 + self.pet.orb.x * (width as f32 - 34.0).max(0.0);
+        let orb_y = ground as f32 - self.pet.orb.height;
         for dy in -2i32..=2 {
             for dx in -2i32..=2 {
                 if dx * dx + dy * dy <= 5 {
@@ -493,7 +530,7 @@ impl Widget for Terri {
         if size.width < 4 || size.height < 3 {
             return;
         }
-        let scale = if size.width < 36 || size.height < 21 {
+        let scale = if size.width < 68 || size.height < 21 {
             2
         } else {
             1
@@ -509,6 +546,16 @@ impl Widget for Terri {
                     / 2;
                 sprite.draw(c, x0, y0, scale, self.palette, theme.surface.background);
                 c.put_str(1, size.height - 1, &self.label(), theme.focused);
+                if self.diagnostics {
+                    for (row, line) in self
+                        .diagnostic_lines()
+                        .iter()
+                        .enumerate()
+                        .take(usize::from(size.height.saturating_sub(1)))
+                    {
+                        c.put_str(0, row as u16, line, theme.bar);
+                    }
+                }
             }
             Err(error) => {
                 self.fault = Some(error.into());
@@ -581,6 +628,7 @@ mod tests {
     #[test]
     fn smooth_transition_and_fault_is_local() {
         let mut t = default_terri();
+        t.pet.x = t.pet.traits.life.favourite_rest;
         t.pet.demo_activity(Activity::Sleep);
         t.advance(Duration::from_millis(50));
         assert!(t.pose.squash > 0.65 && t.pose.squash < 1.0);

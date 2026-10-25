@@ -2,6 +2,7 @@
 use crate::{
     config::PetConfig,
     cues::{EmotionCue, Gesture},
+    life::{self, Action, COUNT, Life, Orb},
 };
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -67,9 +68,16 @@ pub enum Activity {
     Stumble,
     Watch,
     Celebrate,
+    Explore,
+    Chase,
+    Balance,
+    Rest,
+    Nap,
+    Search,
+    Attention,
 }
 impl Activity {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; COUNT] = [
         Self::Wander,
         Self::Sit,
         Self::Play,
@@ -80,10 +88,17 @@ impl Activity {
         Self::Stumble,
         Self::Watch,
         Self::Celebrate,
+        Self::Explore,
+        Self::Chase,
+        Self::Balance,
+        Self::Rest,
+        Self::Nap,
+        Self::Search,
+        Self::Attention,
     ];
     pub fn label(self) -> &'static str {
         match self {
-            Self::Wander => "Exploring",
+            Self::Wander => "Wandering",
             Self::Sit => "Taking a moment",
             Self::Play => "Playing with light",
             Self::Investigate => "What's over there?",
@@ -93,6 +108,13 @@ impl Activity {
             Self::Stumble => "Found my feet",
             Self::Watch => "Here with you",
             Self::Celebrate => "Nicely done!",
+            Self::Explore => "Exploring the habitat",
+            Self::Chase => "Chasing the orb",
+            Self::Balance => "Balancing the orb",
+            Self::Rest => "Resting on the cushion",
+            Self::Nap => "A little nap",
+            Self::Search => "Looking for something to do",
+            Self::Attention => "Hello, I'm listening",
         }
     }
 }
@@ -111,6 +133,7 @@ pub enum Interaction {
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
     pub version: u32,
+    pub life: Life,
     pub energy: f32,
     pub curiosity: f32,
     pub boredom: f32,
@@ -128,7 +151,8 @@ pub struct Snapshot {
 impl Snapshot {
     pub fn new(seed: u64) -> Self {
         Self {
-            version: 1,
+            version: 2,
+            life: Life::new(seed),
             energy: 0.85,
             curiosity: 0.75,
             boredom: 0.1,
@@ -145,8 +169,11 @@ impl Snapshot {
         }
     }
     pub fn validate(&self) -> Result<(), String> {
-        if self.version != 1 {
+        if self.version != 2 {
             return Err(format!("Unsupported Terri state version {}", self.version));
+        }
+        if !self.life.validate() {
+            return Err("Invalid life state".into());
         }
         if [
             self.energy,
@@ -189,11 +216,20 @@ pub struct Pet {
     pub age: f32,
     pub phase: f32,
     pub blink: bool,
+    pub moving: bool,
+    pub orb: Orb,
+    pub utilities: [f32; COUNT],
+    pub autonomous: bool,
+    night: f32,
+    hour: Option<u8>,
+    duration: u64,
+    travel_budget: u16,
+    learned: bool,
     fixed: FixedStep,
     rng: Random,
     config: PetConfig,
     next_choice: u64,
-    cooldowns: [u64; 10],
+    cooldowns: [u64; COUNT],
     priority: u8,
     hold_until: u64,
     next_blink: u64,
@@ -206,11 +242,18 @@ impl Pet {
         if traits.validate().is_err() {
             traits = Snapshot::new(config.seed);
         }
+        if config.reset_personality {
+            traits.life = Life::new(config.seed);
+        }
         let rng = Random::new(traits.rng_state);
-        Self {
+        let x = traits.life.position;
+        let tick = traits.active_ticks;
+        let routine = traits.life.routine;
+        let autonomous = config.autonomous;
+        let mut pet = Self {
             traits,
             activity: Activity::Sit,
-            x: 0.5,
+            x,
             facing: 1.0,
             speaking: false,
             thinking: false,
@@ -221,19 +264,30 @@ impl Pet {
             age: 0.0,
             phase: 0.0,
             blink: false,
+            moving: false,
+            orb: Orb::default(),
+            utilities: [0.0; COUNT],
+            autonomous,
+            night: 0.0,
+            hour: None,
+            duration: 80,
+            travel_budget: 200,
+            learned: false,
             fixed: FixedStep::new(Duration::from_millis(50), 20)
                 .expect("constant valid simulation step"),
             rng,
             config,
-            next_choice: 80,
-            cooldowns: [0; 10],
+            next_choice: tick.saturating_add(80),
+            cooldowns: [0; COUNT],
             priority: 0,
             hold_until: 0,
-            next_blink: 60,
+            next_blink: tick.saturating_add(60),
             blink_until: 0,
             target: 0.5,
             success_context: false,
-        }
+        };
+        pet.choose(routine, 0, 120);
+        pet
     }
     pub fn snapshot(&self) -> Snapshot {
         let mut state = self.traits.clone();
@@ -259,27 +313,57 @@ impl Pet {
             self.next_blink = tick.saturating_add(60 + self.rng.below(100).unwrap_or(0));
         }
         self.blink = tick < self.blink_until;
-        if self.activity == Activity::Wander {
-            let distance = self.target - self.x;
-            self.facing = if distance < 0.0 { -1.0 } else { 1.0 };
-            self.x = (self.x + distance.clamp(-0.003, 0.003)).clamp(0.0, 1.0);
+        self.orb.step();
+        if self.activity == Activity::Chase && self.moving {
+            self.target = self.orb.x;
         }
-        if tick.is_multiple_of(20) {
-            let rest = self.activity == Activity::Sleep;
-            self.traits.energy =
-                (self.traits.energy + if rest { 0.008 } else { -0.0006 }).clamp(0.0, 1.0);
-            self.traits.boredom = (self.traits.boredom
-                + if matches!(
-                    self.activity,
-                    Activity::Play | Activity::Dance | Activity::Investigate
-                ) {
-                    -0.012
-                } else if self.thinking || self.speaking {
-                    -0.015
+        let distance = self.target - self.x;
+        self.moving = distance.abs() > 0.008;
+        if self.moving {
+            self.facing = if distance < 0.0 { -1.0 } else { 1.0 };
+            let speed = if self.activity == Activity::Chase || self.priority >= 60 {
+                0.012
+            } else {
+                0.006
+            };
+            self.x = (self.x + distance.clamp(-speed, speed)).clamp(0.0, 1.0);
+            if self.travel_budget > 0 {
+                self.travel_budget -= 1;
+                self.next_choice = tick.saturating_add(self.duration);
+                if self.priority == 0 || self.priority == 60 {
+                    self.hold_until = self.next_choice;
+                }
+            }
+            self.age = 0.0;
+        } else {
+            self.facing =
+                if self.activity == Activity::Watch || self.activity == Activity::Attention {
+                    1.0
                 } else {
-                    0.003
-                })
-            .clamp(0.0, 1.0);
+                    self.facing
+                };
+            if self.activity == Activity::Balance {
+                self.orb.x += (self.x - self.orb.x) * 0.3;
+                self.orb.height += (34.0 - self.orb.height) * 0.3;
+                self.orb.vertical = 0.0;
+                self.orb.velocity = 0.0;
+            } else if matches!(self.activity, Activity::Play | Activity::Chase)
+                && self.orb.height <= 3.1
+            {
+                self.orb.vertical = 25.0;
+                self.orb.velocity = if self.activity == Activity::Chase {
+                    -self.facing * 0.14
+                } else {
+                    self.facing * 0.025
+                };
+                if self.activity == Activity::Chase && self.age > 2.0 {
+                    self.target = self.orb.x;
+                }
+            }
+        }
+        self.traits.life.position = self.x;
+        if tick.is_multiple_of(20) {
+            self.needs();
         }
         if self.thinking || self.speaking {
             return;
@@ -289,8 +373,8 @@ impl Pet {
             self.denied = false;
             self.gesture = Gesture::None;
         }
-        if self.priority == 0 && tick >= self.next_choice {
-            if self.activity == Activity::Sleep && self.traits.energy < 0.85 {
+        if self.autonomous && self.priority == 0 && tick >= self.next_choice {
+            if self.activity == Activity::Sleep && self.traits.energy < 0.82 {
                 self.next_choice = tick.saturating_add(100);
                 return;
             }
@@ -299,8 +383,82 @@ impl Pet {
                 return;
             }
             let activity = self.select();
-            let duration = 120 + self.rng.below(160).unwrap_or(0);
+            let duration = match activity {
+                Activity::Sleep | Activity::Nap | Activity::Rest => 400,
+                Activity::Wake => 80,
+                _ => 180 + self.rng.below(180).unwrap_or(0),
+            };
             self.choose(activity, 0, duration);
+        }
+    }
+    pub fn set_hour(&mut self, hour: Option<u8>) {
+        self.hour = hour.filter(|h| *h < 24);
+    }
+    pub fn is_night(&self) -> bool {
+        self.config.daily_routine && self.hour.is_some_and(|h| !(7..22).contains(&h))
+    }
+    fn needs(&mut self) {
+        let resting = !self.moving
+            && matches!(
+                self.activity,
+                Activity::Sleep | Activity::Nap | Activity::Rest | Activity::Sit
+            );
+        let playing = !self.moving
+            && matches!(
+                self.activity,
+                Activity::Play | Activity::Chase | Activity::Balance | Activity::Dance
+            );
+        let exploring = matches!(
+            self.activity,
+            Activity::Explore | Activity::Investigate | Activity::Wander
+        );
+        self.night += (if self.is_night() { 1.0 } else { 0.0 } - self.night) * 0.03;
+        self.traits.energy = (self.traits.energy
+            + if resting {
+                0.006
+            } else if self.moving || playing {
+                -0.003
+            } else {
+                -0.001
+            })
+        .clamp(0.0, 1.0);
+        self.traits.boredom = (self.traits.boredom
+            + if playing || exploring || self.speaking {
+                -0.012
+            } else {
+                0.004
+            })
+        .clamp(0.0, 1.0);
+        self.traits.curiosity =
+            (self.traits.curiosity + if exploring { -0.005 } else { 0.002 }).clamp(0.0, 1.0);
+        self.traits.playfulness =
+            (self.traits.playfulness + if playing { -0.005 } else { 0.0015 }).clamp(0.0, 1.0);
+        self.traits.sociability = (self.traits.sociability
+            + if self.speaking || self.activity == Activity::Attention {
+                -0.005
+            } else {
+                0.001
+            })
+        .clamp(0.0, 1.0);
+        let l = &mut self.traits.life;
+        l.comfort = (l.comfort + if resting { 0.006 } else { -0.003 }).clamp(0.0, 1.0);
+        l.restfulness = (l.restfulness + if resting { 0.006 } else { -0.002 }).clamp(0.0, 1.0);
+        if self.activity == Activity::Investigate && !self.moving {
+            l.object_familiarity = (l.object_familiarity + 0.005).min(1.0);
+        }
+        if !self.moving && self.age >= 3.0 && !self.learned && self.config.develop_preferences {
+            self.learned = true;
+            for p in &mut l.preferences {
+                *p += (0.5 - *p) * 0.001;
+            }
+            let pref = &mut l.preferences[self.activity as usize];
+            *pref = (*pref + 0.003 * (1.0 - *pref)).min(0.85);
+            if exploring {
+                l.favourite_explore += (self.x - l.favourite_explore) * 0.01;
+            }
+            if resting {
+                l.favourite_rest += (self.x - l.favourite_rest) * 0.01;
+            }
         }
     }
     fn select(&mut self) -> Activity {
@@ -308,61 +466,151 @@ impl Pet {
             self.traits.mood = Mood::Sleepy;
             return Activity::Sleep;
         }
-        let tick = self.traits.active_ticks;
-        let mut weights = self.config.behaviour_weights.map(u64::from);
+        let s = &self.traits;
+        let l = &s.life;
+        let mut scores = [0.0; COUNT];
         for (i, a) in Activity::ALL.iter().enumerate() {
-            if self.cooldowns[i] > tick || *a == self.activity {
-                weights[i] = 0;
+            let category = match a {
+                Activity::Explore => 0,
+                Activity::Chase | Activity::Balance => 2,
+                Activity::Rest => 1,
+                Activity::Nap => 4,
+                Activity::Search => 3,
+                Activity::Attention => 8,
+                _ => i,
+            };
+            if (category == 2 && self.cooldowns[Activity::Play as usize] > s.active_ticks)
+                || self.cooldowns[i] > s.active_ticks
+                || *a == self.activity
+                || self.config.behaviour_weights[category] == 0
+            {
                 continue;
             }
-            if self.traits.preferred.contains(a) {
-                weights[i] *= 2;
-            }
-            let trait_weight = match a {
-                Activity::Play | Activity::Dance => self.traits.playfulness,
-                Activity::Wander | Activity::Investigate => self.traits.curiosity,
-                Activity::Watch => self.traits.sociability,
-                _ => 0.5,
-            };
-            weights[i] *= 1 + (trait_weight * 4.0) as u64;
             if self.gentle
                 && matches!(
                     a,
-                    Activity::Dance | Activity::Stumble | Activity::Celebrate | Activity::Play
+                    Activity::Play
+                        | Activity::Chase
+                        | Activity::Balance
+                        | Activity::Dance
+                        | Activity::Celebrate
+                        | Activity::Stumble
                 )
             {
-                weights[i] = 0;
+                continue;
             }
-            if self.traits.boredom > 0.5
-                && matches!(a, Activity::Play | Activity::Wander | Activity::Investigate)
-            {
-                weights[i] *= 3;
+            if *a == Activity::Celebrate && !self.success_context {
+                continue;
+            }
+            if *a == Activity::Wake && !matches!(self.activity, Activity::Sleep | Activity::Nap) {
+                continue;
+            }
+            let need = match a {
+                Activity::Sleep | Activity::Nap => {
+                    (1.0 - s.energy) * 70.0
+                        + (1.0 - l.restfulness) * 25.0
+                        + self.night * if *a == Activity::Sleep { 80.0 } else { 55.0 }
+                }
+                Activity::Rest | Activity::Sit => {
+                    (1.0 - l.comfort) * 70.0 + (1.0 - s.energy) * 30.0
+                }
+                Activity::Play | Activity::Chase | Activity::Balance => {
+                    s.boredom * 30.0 + s.playfulness * 25.0 + l.character[1] * 12.0
+                }
+                Activity::Explore | Activity::Wander => {
+                    s.curiosity * 30.0 + s.boredom * 20.0 + l.character[0] * 12.0
+                }
+                Activity::Investigate => s.curiosity * 25.0 + (1.0 - l.object_familiarity) * 20.0,
+                Activity::Watch | Activity::Attention => {
+                    s.sociability * 30.0 + l.character[2] * 10.0
+                }
+                Activity::Dance => s.playfulness * 30.0 + s.energy * 10.0,
+                Activity::Search => s.boredom * 25.0 + (1.0 - s.curiosity) * 25.0,
+                Activity::Wake | Activity::Celebrate | Activity::Stumble => 0.0,
+            };
+            if matches!(a, Activity::Sleep | Activity::Nap) && s.energy > 0.75 && self.night < 0.5 {
+                continue;
+            }
+            scores[i] =
+                (need + l.preferences[i] * 15.0 + if s.preferred.contains(a) { 5.0 } else { 0.0 })
+                    * (0.75 + (self.config.behaviour_weights[category] as f32 / 80.0).min(3.0));
+        }
+        self.utilities = scores;
+        let mut best = Activity::Sit;
+        let mut value = 0.0;
+        for (i, score) in scores.iter().enumerate() {
+            if *score <= 0.0 {
+                continue;
+            }
+            let score = score + self.rng.below(120).unwrap_or(0) as f32 / 10.0;
+            if score > value {
+                value = score;
+                best = Activity::ALL[i];
             }
         }
-        let mut value = self.rng.below(weights.iter().sum()).unwrap_or(0);
-        for (i, weight) in weights.iter().enumerate() {
-            if value < *weight {
-                return Activity::ALL[i];
-            }
-            value = value.saturating_sub(*weight);
+        best
+    }
+    pub fn interact(&mut self, action: Action) {
+        let i = action as usize;
+        self.traits.life.interactions[i] = self.traits.life.interactions[i].saturating_add(1);
+        self.traits.life.familiarity = (self.traits.life.familiarity + 0.002).min(1.0);
+        if self.thinking || self.speaking {
+            return;
         }
-        Activity::Sit
+        self.priority = 0;
+        let activity = match action {
+            Action::Attention => Activity::Attention,
+            Action::Orb => Activity::Balance,
+            Action::Play => Activity::Chase,
+            Action::Rest => Activity::Rest,
+            Action::Wake => Activity::Wake,
+        };
+        if self.gentle && matches!(action, Action::Play | Action::Orb) {
+            self.choose(Activity::Attention, 60, 100);
+        } else {
+            self.choose(activity, 60, 200);
+        }
+    }
+    pub fn reset_preferences(&mut self) {
+        self.traits.life = Life::new(self.config.seed);
+        self.traits.life.position = self.x;
     }
     pub fn choose(&mut self, activity: Activity, priority: u8, duration: u64) {
         if priority < self.priority {
             return;
         }
         if self.activity != activity {
-            self.cooldowns[self.activity as usize] = self.traits.active_ticks.saturating_add(180);
+            self.cooldowns[self.activity as usize] = self.traits.active_ticks.saturating_add(600);
             self.age = 0.0;
         }
+        if self.activity != activity {
+            self.learned = false;
+        }
         self.activity = activity;
+        self.traits.life.routine = activity;
+        self.duration = duration;
+        self.travel_budget = 200;
         self.priority = priority;
         self.hold_until = self.traits.active_ticks.saturating_add(duration);
         self.next_choice = self.hold_until;
-        if activity == Activity::Wander {
-            self.target = self.rng.below(1000).unwrap_or(500) as f32 / 1000.0;
-        }
+        self.target = match activity {
+            Activity::Sleep | Activity::Rest | Activity::Nap => self.traits.life.favourite_rest,
+            Activity::Investigate => life::PLANT,
+            Activity::Watch | Activity::Attention => life::CHAT,
+            Activity::Play | Activity::Chase | Activity::Balance => self.orb.x,
+            Activity::Wander | Activity::Search => {
+                self.rng.below(901).unwrap_or(450) as f32 / 1000.0 + 0.05
+            }
+            Activity::Explore => {
+                if self.rng.below(2) == Some(0) {
+                    self.traits.life.favourite_explore
+                } else {
+                    self.rng.below(901).unwrap_or(450) as f32 / 1000.0 + 0.05
+                }
+            }
+            _ => self.x,
+        };
+        self.moving = (self.target - self.x).abs() > 0.008;
         if priority == 0 {
             self.traits.mood = match activity {
                 Activity::Sleep => Mood::Sleepy,
@@ -399,7 +647,7 @@ impl Pet {
                 if self.thinking || self.speaking {
                     return;
                 }
-                let was_sleep = self.activity == Activity::Sleep;
+                let was_sleep = matches!(self.activity, Activity::Sleep | Activity::Nap);
                 self.traits.last_interaction = Interaction::Typing;
                 self.traits.mood = Mood::Focused;
                 self.choose(
@@ -424,6 +672,7 @@ impl Pet {
                 {
                     self.gesture = Gesture::Wave;
                 }
+                self.traits.life.familiarity = (self.traits.life.familiarity + 0.002).min(1.0);
                 self.traits.interactions = self.traits.interactions.saturating_add(1);
                 self.traits.last_interaction = Interaction::Question;
                 self.traits.boredom = (self.traits.boredom - 0.2).max(0.0);
@@ -559,6 +808,128 @@ mod tests {
     use super::*;
     fn pet() -> Pet {
         Pet::new(PetConfig::default(), Snapshot::new(7))
+    }
+    #[test]
+    fn chase_cannot_extend_itself_forever() {
+        let mut p = pet();
+        p.interact(Action::Play);
+        for _ in 0..800 {
+            p.advance(Duration::from_millis(50));
+        }
+        assert_ne!(p.activity, Activity::Chase);
+        assert!(p.traits.energy > 0.1);
+    }
+    #[test]
+    fn day_night_bias_and_disabled_learning() {
+        let mut day = pet();
+        let mut night = pet();
+        day.traits.energy = 0.6;
+        night.traits.energy = 0.6;
+        night.night = 1.0;
+        day.select();
+        night.select();
+        assert!(night.utilities[Activity::Nap as usize] > day.utilities[Activity::Nap as usize]);
+        day.config.develop_preferences = false;
+        let before = day.traits.life.preferences;
+        day.interact(Action::Rest);
+        for _ in 0..200 {
+            day.advance(Duration::from_millis(50));
+        }
+        assert_eq!(day.traits.life.preferences, before);
+    }
+    #[test]
+    fn navigation_precedes_rest_and_orb_interaction() {
+        let mut p = pet();
+        p.interact(Action::Rest);
+        assert!(p.moving);
+        let before = p.x;
+        p.advance(Duration::from_millis(50));
+        assert!((p.x - before).abs() <= 0.013);
+        assert!(p.moving);
+        for _ in 0..80 {
+            p.advance(Duration::from_millis(50));
+        }
+        assert!(!p.moving);
+        assert!((p.x - p.traits.life.favourite_rest).abs() < 0.01);
+        p.interact(Action::Orb);
+        for _ in 0..120 {
+            p.advance(Duration::from_millis(50));
+        }
+        assert_eq!(p.activity, Activity::Balance);
+        assert!(!p.moving);
+        assert!(p.orb.height > 30.0);
+    }
+    #[test]
+    fn needs_routine_and_learning_are_bounded() {
+        let mut p = pet();
+        p.set_hour(Some(23));
+        assert!(p.is_night());
+        p.config.daily_routine = false;
+        assert!(!p.is_night());
+        p.config.daily_routine = true;
+        p.x = p.traits.life.favourite_rest;
+        p.traits.energy = 0.3;
+        p.traits.life.comfort = 0.1;
+        p.interact(Action::Rest);
+        let preferences = p.traits.life.preferences;
+        for _ in 0..100 {
+            p.advance(Duration::from_millis(50));
+        }
+        assert!(p.traits.energy > 0.3);
+        assert!(p.traits.life.comfort > 0.1);
+        assert!(
+            p.traits.life.preferences[Activity::Rest as usize]
+                > preferences[Activity::Rest as usize]
+        );
+        assert!(
+            p.traits.life.preferences[Activity::Rest as usize]
+                - preferences[Activity::Rest as usize]
+                < 0.01
+        );
+        p.event(PetEvent::Typing);
+        assert!(matches!(p.activity, Activity::Watch | Activity::Wake));
+        p.traits.validate().unwrap();
+        p.reset_preferences();
+        assert_eq!(p.traits.life.preferences, [0.5; COUNT]);
+    }
+    #[test]
+    fn conversation_preempts_life_and_pause_prevents_selection() {
+        let mut p = pet();
+        p.interact(Action::Play);
+        p.event(PetEvent::User("I am grieving and sad"));
+        p.event(PetEvent::Thinking);
+        p.interact(Action::Orb);
+        assert_eq!(p.activity, Activity::Watch);
+        assert!(p.thinking);
+        p.event(PetEvent::Done("I am here."));
+        for _ in 0..600 {
+            p.advance(Duration::from_millis(50));
+        }
+        assert!(!matches!(
+            p.activity,
+            Activity::Play | Activity::Chase | Activity::Dance | Activity::Celebrate
+        ));
+        p.autonomous = false;
+        p.interact(Action::Rest);
+        for _ in 0..1000 {
+            p.advance(Duration::from_millis(50));
+        }
+        assert_eq!(p.activity, Activity::Rest);
+    }
+    #[test]
+    fn utilities_respond_to_needs_and_cooldowns() {
+        let mut p = pet();
+        p.traits.energy = 0.1;
+        assert_eq!(p.select(), Activity::Sleep);
+        p.traits.energy = 0.9;
+        p.traits.curiosity = 1.0;
+        p.traits.boredom = 1.0;
+        let first = p.select();
+        p.choose(first, 0, 100);
+        assert_ne!(p.select(), first);
+        p.choose(Activity::Sit, 0, 100);
+        assert_ne!(p.select(), first);
+        assert!(p.utilities.iter().all(|v| v.is_finite() && *v >= 0.0));
     }
     #[test]
     fn deterministic_bounded_and_cooldowns() {

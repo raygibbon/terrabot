@@ -17,7 +17,9 @@ fn main() {
         let step = Duration::from_secs_f64(1.0 / fps as f64);
         for frame in 0..fps * 20 {
             if frame % fps == 0 {
-                terri.pet.demo_activity(Activity::ALL[frame / fps % 10]);
+                terri
+                    .pet
+                    .demo_activity(Activity::ALL[frame / fps % Activity::ALL.len()]);
             }
             let start = Instant::now();
             terri.advance(step);

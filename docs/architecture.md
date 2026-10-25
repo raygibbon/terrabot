@@ -92,3 +92,30 @@ absent. A denial animation is a demonstration, not a policy implementation.
 The AI can propose actions, but only independent policy enforcement can authorise
 execution. Future providers can reuse the domain-event boundary without owning
 the terminal or directly mutating personality state.
+
+## v0.3 habitat and life
+
+`life.rs` defines bounded persisted habitat metadata, stable character traits and
+orb physics. `pet.rs` remains the authoritative 20-Hz TerraGame FixedStep simulation;
+it receives explicit clock hours, actions and conversation events. `animation.rs`
+projects normalized positions and simulation activity into clipped terminal cells,
+without choosing activities or mutating state during rendering.
+
+Utility selection combines need deficits, stable traits, gradual learned preferences
+and backward-compatible category weights. Individual activities have 30-second
+cooldowns; current activity is excluded. Sleep has energy hysteresis. Travel follows
+one-dimensional habitat targets at a bounded speed, with up to ten seconds of
+travel extension before the interaction deadline must expire. Conversation events
+have higher priority than autonomous choices and direct pet requests cannot
+interrupt generation. Six procedural particles remain the hard rendering bound.
+
+The F4 menu uses the same TerraTUI Panel and modal focus management as F6. Actions
+operate only on the pet, preserve draft/model history and never call the provider.
+The demo runs the same autonomous engine, supports manual activities, seeded initial
+state and diagnostic overlays. `terri-life` injects a repeatable daily schedule for
+accelerated bounds and repetition checks.
+
+Snapshot version 2 adds `Life` metadata. Version 1 is parsed and migrated in memory
+before validation, with no write until ordinary clean shutdown. Unsupported/corrupt
+files retain the prior preservation behavior. No offline catch-up runs. Routine
+and needs resume, but transient movement, animation timers and model requests reset.

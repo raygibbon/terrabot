@@ -1,4 +1,4 @@
-# Terrabot v0.2 — Terri
+# Terrabot v0.3 — Terri
 
 Terri is a curious, technically capable AI companion who lives in your terminal.
 Her handcrafted lilac coat, mint orb, expressive eyes and tiny feet are drawn
@@ -43,21 +43,26 @@ cargo run --release --example terri-demo -- --auto
 | Demo key | Action |
 | --- | --- |
 | M | Cycle the eleven moods |
-| N | Trigger the next of ten activities |
+| N | Trigger the next of seventeen activities |
 | B / E | Increase boredom / reduce energy |
 | S / W | Sleep / wake and attend |
 | F | Simulate speaking for three seconds |
 | D | Simulate a security denial; executes nothing |
 | R | Reset the simulation |
-| A | Toggle automatic activity cycle |
+| A | Toggle autonomous life |
+| I | Toggle diagnostic overlay |
+| O / C / H | Offer orb / chase / attention |
+| U / L | Raise curiosity / lower comfort |
+| T | Toggle day/night input for testing |
 | P | Toggle animation |
 | − / + | Reduce / increase motion intensity |
 | Q / Escape / Ctrl+C | Quit |
 
 The demo does not load or save your personality file. Optional arguments:
 `--fps 20`, `--seconds 10`, `--indexed`, `--ascii`. Timed runs print observed
-render pacing after restoring the terminal. The automatic cycle changes activity
-every four seconds; leave it running for forty seconds to see all ten.
+render pacing after restoring the terminal. Autonomous mode is enabled by default and chooses activities from needs and context.
+Use `--manual` to pause autonomous selection, `--diagnostics` for the overlay, and
+`--seed 7` for reproducible initial traits. N cycles all activities for inspection.
 
 ## Chat controls
 
@@ -69,6 +74,7 @@ every four seconds; leave it running for forty seconds to see all ten.
 | Page Up / Page Down | Scroll conversation |
 | Escape | Cancel the active request |
 | F2 / F3 | Resize Terri's panel on larger terminals |
+| F4 | Pet controls: attention, orb, play, rest, wake, inspect, autonomy, reset |
 | F5 | Recheck server and model |
 | F6 | Open model picker; arrows navigate, Enter selects, Escape closes |
 | F7 | Toggle normal / reduced motion |
@@ -191,3 +197,47 @@ Connection failures/timeouts get at most two automatic discovery retries, after
 check and cancels an active request. Partial or cancelled responses remain visible
 but are excluded from model history. Loading/thinking, generation, timeout and
 interrupted-stream states are reported separately. Esc cancels an active request.
+
+## Life in the habitat
+
+Terri now chooses activities from seven bounded needs: energy, boredom, curiosity,
+playfulness, comfort, sociability and restfulness. Stable boldness, liveliness and
+social inclination influence utility scores. Preferences change a little after
+completed interactions; cooldowns, bounded travel and minimum durations prevent
+rapid switching or endless chasing. This is a cosmetic virtual creature, with no
+illness, death, care obligations or claims of consciousness.
+
+She walks toward her cushion, orb, plant or chat side before interacting. Orb
+bounces use fixed-step gravity and damping; balancing catches it above her head.
+Walking, sitting, napping, stretching, reaching and play share the original
+handcrafted character art and smooth pose transitions. A small viewport uses the
+same art at half size, with all drawing clipped to the panel.
+
+F4 opens a keyboard-operated pet menu. These actions never send Ollama requests.
+Typing and generation take priority over autonomous behavior; completed replies
+release that priority. Serious conversation cues suppress playful activities.
+The diagnostic overlay shows needs, travel/interaction phase, position, ticks and
+the strongest scores at the most recent decision. Toggle it through F4 or set
+`[pet] diagnostics = true`.
+
+Optional `daily_routine` uses the local clock to favor rest at night (22:00–07:00),
+without forcing sleep or delaying replies. The clock is sampled once a minute on
+Unix; platforms without that clock adapter use neutral behavior. Set it false
+for time-independent behavior. No unattended elapsed time is simulated on startup.
+
+State format 2 extends the existing private JSON file with needs, stable traits,
+activity preferences, favorite locations, interaction counters, familiarity and
+current routine. Version-1 files migrate in memory and save atomically on clean
+exit; corrupt or unsupported files stay untouched. Chat transcripts and credentials
+are never included. `develop_preferences = false` freezes preference learning;
+F4 can reset learned traits, or `reset_personality = true` resets them each launch.
+Autonomy and overlay switches in F4 apply to the current session; config sets defaults.
+
+For an accelerated, deterministic 24-hour life run without a terminal or Ollama:
+
+```bash
+cargo run --release --example terri-life -- 86400 7
+```
+
+It checks bounds every tick and reports time in each activity, transitions, longest
+activity and final state as JSON. The injected day/night schedule starts at noon.

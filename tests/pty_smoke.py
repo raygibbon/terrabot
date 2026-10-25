@@ -206,7 +206,7 @@ class Smoke(unittest.TestCase):
             self.assertIsNone(t.process.poll())
         finally:
             t.close()
-        self.assertEqual(t.saved_state["version"], 1)
+        self.assertEqual(t.saved_state["version"], 2)
         self.assertGreaterEqual(t.saved_state["conversations"], 1)
         self.assertNotIn("hello Terri", json.dumps(t.saved_state))
 
@@ -238,6 +238,24 @@ class Smoke(unittest.TestCase):
             t.wait_for("Models")
         finally:
             t.close(b"\x03")
+    def test_pet_controls_preserve_draft_without_model_requests(self):
+        self.server.requests.clear()
+        t = Terminal(self.endpoint)
+        try:
+            t.wait_for("Connected")
+            t.send("draft")
+            t.send(b"\x1bOS")  # F4 opens separate pet controls
+            t.wait_for("Offer the orb")
+            t.send(b"\x1b[B\r")
+            t.pump(0.3)
+            self.assertEqual(len(self.server.requests), 0)
+            t.send(" remains\r")
+            t.wait_for("streamed reply.")
+            self.assertEqual(self.server.requests[-1]["messages"][-1]["content"], "draft remains")
+        finally:
+            t.close()
+        self.assertEqual(t.saved_state["life"]["interactions"][1], 1)
+
     def test_empty_models(self):
         self.server.models = []
         t = Terminal(self.endpoint, "auto")

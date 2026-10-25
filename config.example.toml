@@ -21,8 +21,15 @@ palette = "auto" # auto, truecolor, indexed, ascii
 
 [pet]
 persist = true
+# All pet actions are local; F4 opens pet controls without sending a prompt.
+autonomous = true
+daily_routine = true # local day/night bias; never blocks conversations
+develop_preferences = true
+reset_personality = false # reset learned life traits on each launch while enabled
+diagnostics = false # activity, needs, utility scores, position, tick
 seed = 361940275785
 # Wander, Sit, Play, Investigate, Sleep, Wake, Dance, Stumble, Watch, Celebrate.
+# New activities inherit related category weights (rest uses Sit; nap uses Sleep).
 # Each weight 0–1000. At least one must be nonzero. Low energy can still select rest.
 behaviour_weights = [24, 14, 22, 16, 3, 0, 8, 1, 12, 0]
 

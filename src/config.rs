@@ -71,6 +71,11 @@ impl Default for Interface {
 #[serde(default, deny_unknown_fields)]
 pub struct PetConfig {
     pub persist: bool,
+    pub autonomous: bool,
+    pub daily_routine: bool,
+    pub develop_preferences: bool,
+    pub reset_personality: bool,
+    pub diagnostics: bool,
     pub seed: u64,
     /// Wander, sit, play, investigate, sleep, wake, dance, stumble, watch, celebrate.
     pub behaviour_weights: [u16; 10],
@@ -79,6 +84,11 @@ impl Default for PetConfig {
     fn default() -> Self {
         Self {
             persist: true,
+            autonomous: true,
+            daily_routine: true,
+            develop_preferences: true,
+            reset_personality: false,
+            diagnostics: false,
             seed: 0x5445525249,
             behaviour_weights: [24, 14, 22, 16, 3, 0, 8, 1, 12, 0],
         }
@@ -152,7 +162,7 @@ impl Config {
         }
         if c.security.tools_enabled || c.security.mcp_enabled || c.security.shell_enabled {
             return Err(
-                "v0.2 supports chat only; all security enable flags must remain false".into(),
+                "v0.3 supports chat only; all security enable flags must remain false".into(),
             );
         }
         Ok(c)
